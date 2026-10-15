@@ -6,8 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview",
-    "deploy:site": "npm run build && rm -rf ../morganlaw.github.io/mapgan && cp -r dist ../morganlaw.github.io/mapgan && cd ../morganlaw.github.io && git add mapgan && git commit -m 'Deploy mapgan to m7w.ca/mapgan' && git push"
+    "preview": "vite preview"
   },
   "dependencies": {
     "clsx": "^2.1.1",
