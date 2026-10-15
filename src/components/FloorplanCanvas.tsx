@@ -33,6 +33,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
   state,
   setState,
   tool,
+  setTool,
   selectedId,
   setSelectedId,
   selectedType,
@@ -124,9 +125,12 @@ export const FloorplanCanvas: React.FC<Props> = ({
             thickness: 15,
           };
           setState((prev) => ({ ...prev, walls: [...prev.walls, newWall] }));
-          // Chain to next wall segment
-          setWallStart(finalEnd);
-          setWallCurrent(finalEnd);
+          // Complete single wall segment and revert to select tool
+          setWallStart(null);
+          setWallCurrent(null);
+          setTool('select');
+          setSelectedId(newWall.id);
+          setSelectedType('wall');
         }
       }
     } else if (tool === 'door') {
@@ -141,6 +145,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
       setState((prev) => ({ ...prev, doors: [...prev.doors, newDoor] }));
       setSelectedId(newDoor.id);
       setSelectedType('door');
+      setTool('select');
     } else if (tool === 'window') {
       const newWin: WindowItem = {
         id: 'win_' + Date.now(),
@@ -153,6 +158,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
       setState((prev) => ({ ...prev, windows: [...prev.windows, newWin] }));
       setSelectedId(newWin.id);
       setSelectedType('window');
+      setTool('select');
     } else if (tool === 'measure') {
       setMeasureStart(snappedPoint);
       setMeasureEnd(snappedPoint);
@@ -257,6 +263,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
         setWallCurrent(null);
         setMeasureStart(null);
         setMeasureEnd(null);
+        setTool('select');
       } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) {
         // Delete selected element
         if (selectedType === 'furniture') {

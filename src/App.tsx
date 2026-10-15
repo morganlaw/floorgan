@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { FloorplanState, ToolMode } from './types';
 import { TEMPLATES } from './templates';
 import { Toolbar } from './components/Toolbar';
@@ -8,9 +8,34 @@ import { PropertiesPanel } from './components/PropertiesPanel';
 import { HelpCircle, X } from 'lucide-react';
 import './App.css';
 
+const STORAGE_KEY = 'mapgan_floorplan_v1';
+
 export const App: React.FC = () => {
-  // Pre-load the Modern Studio Apartment template as initial state
-  const [state, setState] = useState<FloorplanState>(TEMPLATES.studio.state);
+  // Load saved floorplan from browser localStorage or default to studio template
+  const [state, setState] = useState<FloorplanState>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && Array.isArray(parsed.walls)) {
+          return parsed;
+        }
+      }
+    } catch (e) {
+      console.warn('Could not load saved floorplan from localStorage', e);
+    }
+    return TEMPLATES.studio.state;
+  });
+
+  // Automatically persist state changes to browser localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch (e) {
+      console.warn('Could not save floorplan to localStorage', e);
+    }
+  }, [state]);
+
   const [tool, setTool] = useState<ToolMode>('select');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedType, setSelectedType] = useState<
