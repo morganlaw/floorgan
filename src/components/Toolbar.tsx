@@ -102,7 +102,7 @@ export const Toolbar: React.FC<Props> = ({
       <div className="brand">
         <span className="brand-logo">📐</span>
         <div>
-          <h1 className="brand-title">MapGAN</h1>
+          <h1 className="brand-title">FloorGAN</h1>
           <span className="brand-sub">Floorplan & Furniture</span>
         </div>
       </div>
@@ -252,7 +252,7 @@ export const Toolbar: React.FC<Props> = ({
           className="tool-btn"
           onClick={() => {
             const svg = document.getElementById('floorplan-svg') as unknown as SVGSVGElement;
-            if (svg) exportSVGToPNG(svg, 'mapgan-floorplan.png');
+            if (svg) exportSVGToPNG(svg, 'floorgan-floorplan.png');
           }}
           title="Export high-resolution PNG image"
         >
@@ -262,7 +262,7 @@ export const Toolbar: React.FC<Props> = ({
 
         <button
           className="tool-btn-icon"
-          onClick={() => exportToJSON(state, 'mapgan-floorplan.json')}
+          onClick={() => exportToJSON(state, 'floorgan-floorplan.json')}
           title="Save Project (JSON)"
         >
           <FileSpreadsheet size={18} />

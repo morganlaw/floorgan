@@ -1,4 +1,4 @@
-# MapGAN - Floorplan & Furniture Placement Planner
+# FloorGAN - Floorplan & Furniture Placement Planner
 
 Interactive web application for floorplan layout drafting, furniture placement, and spatial visualization.
 

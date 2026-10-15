@@ -8,13 +8,13 @@ import { PropertiesPanel } from './components/PropertiesPanel';
 import { HelpCircle, X } from 'lucide-react';
 import './App.css';
 
-const STORAGE_KEY = 'mapgan_floorplan_v1';
+const STORAGE_KEY = 'floorgan_floorplan_v1';
 
 export const App: React.FC = () => {
   // Load saved floorplan from browser localStorage or default to studio template
   const [state, setState] = useState<FloorplanState>(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEY);
+      const saved = localStorage.getItem(STORAGE_KEY) || localStorage.getItem('mapgan_floorplan_v1');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed && Array.isArray(parsed.walls)) {
@@ -117,7 +117,7 @@ export const App: React.FC = () => {
         <div className="modal-backdrop" onClick={() => setShowHelp(false)}>
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3 className="modal-title">MapGAN Planner Guide</h3>
+              <h3 className="modal-title">FloorGAN Planner Guide</h3>
               <button className="modal-close" onClick={() => setShowHelp(false)}>
                 <X size={18} />
               </button>

@@ -42,11 +42,11 @@ jobs:
           path: website
           token: ${{ secrets.WEBSITE_DEPLOY_TOKEN }}
 
-      - name: Copy build to website/mapgan
+      - name: Copy build to website/floorgan
         if: steps.check-token.outputs.has_token == 'true'
         run: |
-          rm -rf website/mapgan
-          cp -r dist website/mapgan
+          rm -rf website/floorgan
+          cp -r dist website/floorgan
 
       - name: Commit and push to website
         if: steps.check-token.outputs.has_token == 'true'
@@ -54,10 +54,10 @@ jobs:
           cd website
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add mapgan
+          git add floorgan
           if git diff --staged --quiet; then
             echo "No changes to deploy"
           else
-            git commit -m "Auto-deploy MapGAN from morganlaw/mapgan@${{ github.sha }}"
+            git commit -m "Auto-deploy FloorGAN from morganlaw/floorgan@${{ github.sha }}"
             git push origin master
           fi
