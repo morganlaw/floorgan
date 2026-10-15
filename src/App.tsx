@@ -18,7 +18,10 @@ export const App: React.FC = () => {
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed && Array.isArray(parsed.walls)) {
-          return parsed;
+          return {
+            ...parsed,
+            measurements: parsed.measurements || [],
+          };
         }
       }
     } catch (e) {
@@ -39,7 +42,7 @@ export const App: React.FC = () => {
   const [tool, setTool] = useState<ToolMode>('select');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedType, setSelectedType] = useState<
-    'furniture' | 'wall' | 'door' | 'window' | null
+    'furniture' | 'wall' | 'door' | 'window' | 'measurement' | null
   >(null);
 
   // View state

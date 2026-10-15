@@ -59,6 +59,12 @@ export interface PlacedFurniture {
   iconType: string;
 }
 
+export interface Measurement {
+  id: string;
+  start: Point;
+  end: Point;
+}
+
 export type ToolMode = 'select' | 'wall' | 'door' | 'window' | 'measure' | 'pan' | 'eraser';
 
 export interface FloorplanState {
@@ -66,6 +72,7 @@ export interface FloorplanState {
   doors: Door[];
   windows: WindowItem[];
   furniture: PlacedFurniture[];
+  measurements: Measurement[];
   unit: Unit;
   gridSnap: boolean;
   gridSize: number; // in cm (e.g. 20cm or 50cm)

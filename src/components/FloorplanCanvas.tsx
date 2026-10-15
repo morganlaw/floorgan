@@ -6,6 +6,7 @@ import {
   Wall,
   Door,
   WindowItem,
+  Measurement,
 } from '../types';
 import {
   snapPointToGrid,
@@ -21,8 +22,8 @@ interface Props {
   setTool: (tool: ToolMode) => void;
   selectedId: string | null;
   setSelectedId: (id: string | null) => void;
-  selectedType: 'furniture' | 'wall' | 'door' | 'window' | null;
-  setSelectedType: (type: 'furniture' | 'wall' | 'door' | 'window' | null) => void;
+  selectedType: 'furniture' | 'wall' | 'door' | 'window' | 'measurement' | null;
+  setSelectedType: (type: 'furniture' | 'wall' | 'door' | 'window' | 'measurement' | null) => void;
   zoom: number;
   setZoom: React.Dispatch<React.SetStateAction<number>>;
   pan: Point;
@@ -160,8 +161,28 @@ export const FloorplanCanvas: React.FC<Props> = ({
       setSelectedType('window');
       setTool('select');
     } else if (tool === 'measure') {
-      setMeasureStart(snappedPoint);
-      setMeasureEnd(snappedPoint);
+      if (!measureStart) {
+        setMeasureStart(snappedPoint);
+        setMeasureEnd(snappedPoint);
+      } else {
+        const finalEnd = e.shiftKey ? snapAngle(measureStart, snappedPoint) : snappedPoint;
+        if (distance(measureStart, finalEnd) > 5) {
+          const newMeasurement: Measurement = {
+            id: 'measure_' + Date.now(),
+            start: measureStart,
+            end: finalEnd,
+          };
+          setState((prev) => ({
+            ...prev,
+            measurements: [...prev.measurements, newMeasurement],
+          }));
+          setMeasureStart(null);
+          setMeasureEnd(null);
+          setSelectedId(newMeasurement.id);
+          setSelectedType('measurement');
+          setTool('select');
+        }
+      }
     } else if (tool === 'select') {
       // Clicked on empty canvas background -> deselect
       setSelectedId(null);
@@ -285,6 +306,11 @@ export const FloorplanCanvas: React.FC<Props> = ({
           setState((prev) => ({
             ...prev,
             windows: prev.windows.filter((w) => w.id !== selectedId),
+          }));
+        } else if (selectedType === 'measurement') {
+          setState((prev) => ({
+            ...prev,
+            measurements: prev.measurements.filter((m) => m.id !== selectedId),
           }));
         }
         setSelectedId(null);
@@ -828,6 +854,86 @@ export const FloorplanCanvas: React.FC<Props> = ({
               />
             </g>
           )}
+
+          {/* Placed Persistent Measurements */}
+          {state.measurements.map((m) => {
+            const isSelected = selectedId === m.id;
+            const dist = distance(m.start, m.end);
+            const midX = (m.start.x + m.end.x) / 2;
+            const midY = (m.start.y + m.end.y) / 2;
+
+            return (
+              <g
+                key={m.id}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelectedId(m.id);
+                  setSelectedType('measurement');
+                }}
+                className="cursor-pointer"
+              >
+                {/* Invisible wide hit area for easy clicking */}
+                <line
+                  x1={m.start.x}
+                  y1={m.start.y}
+                  x2={m.end.x}
+                  y2={m.end.y}
+                  stroke="transparent"
+                  strokeWidth="20"
+                />
+                {/* Visible measurement line */}
+                <line
+                  x1={m.start.x}
+                  y1={m.start.y}
+                  x2={m.end.x}
+                  y2={m.end.y}
+                  stroke={isSelected ? '#2563eb' : '#e11d48'}
+                  strokeWidth={isSelected ? '3' : '2'}
+                  strokeDasharray="6 3"
+                />
+                {/* End ticks / dots */}
+                <circle
+                  cx={m.start.x}
+                  cy={m.start.y}
+                  r={isSelected ? '6' : '4.5'}
+                  fill={isSelected ? '#2563eb' : '#e11d48'}
+                  stroke="#ffffff"
+                  strokeWidth="1.5"
+                />
+                <circle
+                  cx={m.end.x}
+                  cy={m.end.y}
+                  r={isSelected ? '6' : '4.5'}
+                  fill={isSelected ? '#2563eb' : '#e11d48'}
+                  stroke="#ffffff"
+                  strokeWidth="1.5"
+                />
+                {/* Dimension Badge */}
+                <g transform={`translate(${midX}, ${midY})`}>
+                  <rect
+                    x="-34"
+                    y="-12"
+                    width="68"
+                    height="24"
+                    rx="6"
+                    fill={isSelected ? '#2563eb' : '#e11d48'}
+                    stroke="#ffffff"
+                    strokeWidth="1.5"
+                  />
+                  <text
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    fontSize="11"
+                    fontWeight="bold"
+                    fill="#ffffff"
+                    fontFamily="monospace"
+                  >
+                    {formatDimension(dist, state.unit)}
+                  </text>
+                </g>
+              </g>
+            );
+          })}
 
           {/* Measuring Tape Tool Preview */}
           {measureStart && measureEnd && (

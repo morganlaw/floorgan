@@ -7,6 +7,7 @@ export const TEMPLATES: Record<string, { name: string; state: FloorplanState }> 
       unit: 'm',
       gridSnap: true,
       gridSize: 20,
+      measurements: [],
       walls: [
         // Exterior perimeter
         { id: 'w1', start: { x: 100, y: 100 }, end: { x: 800, y: 100 }, thickness: 20 },
@@ -158,6 +159,7 @@ export const TEMPLATES: Record<string, { name: string; state: FloorplanState }> 
       unit: 'm',
       gridSnap: true,
       gridSize: 20,
+      measurements: [],
       walls: [
         // Exterior perimeter
         { id: 'w1', start: { x: 80, y: 80 }, end: { x: 980, y: 80 }, thickness: 20 },

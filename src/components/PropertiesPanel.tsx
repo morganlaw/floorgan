@@ -15,7 +15,7 @@ interface Props {
   setState: React.Dispatch<React.SetStateAction<FloorplanState>>;
   selectedId: string | null;
   setSelectedId: (id: string | null) => void;
-  selectedType: 'furniture' | 'wall' | 'door' | 'window' | null;
+  selectedType: 'furniture' | 'wall' | 'door' | 'window' | 'measurement' | null;
   setSelectedType: (type: any) => void;
 }
 
@@ -31,6 +31,7 @@ export const PropertiesPanel: React.FC<Props> = ({
   const selectedWall = state.walls.find((w) => w.id === selectedId);
   const selectedDoor = state.doors.find((d) => d.id === selectedId);
   const selectedWindow = state.windows.find((w) => w.id === selectedId);
+  const selectedMeasurement = state.measurements.find((m) => m.id === selectedId);
 
   const colors = [
     '#334155', // Slate
@@ -108,6 +109,11 @@ export const PropertiesPanel: React.FC<Props> = ({
       setState((prev) => ({
         ...prev,
         windows: prev.windows.filter((w) => w.id !== selectedId),
+      }));
+    } else if (selectedType === 'measurement') {
+      setState((prev) => ({
+        ...prev,
+        measurements: prev.measurements.filter((m) => m.id !== selectedId),
       }));
     }
     setSelectedId(null);
@@ -402,6 +408,33 @@ export const PropertiesPanel: React.FC<Props> = ({
           <button className="btn-danger w-full mt-4" onClick={handleDelete}>
             <Trash2 size={15} />
             <span>Delete Window</span>
+          </button>
+        </div>
+      )}
+
+      {/* Selected Measurement Inspector */}
+      {selectedMeasurement && (
+        <div className="inspector-content">
+          <div className="info-card">
+            <span className="info-title">Measurement Dimension</span>
+            <span className="info-value font-mono">
+              Distance: {formatDimension(distance(selectedMeasurement.start, selectedMeasurement.end), state.unit)}
+            </span>
+          </div>
+
+          <div className="field-group">
+            <label className="field-label">Endpoints</label>
+            <span className="text-xs font-mono text-slate-500">
+              Start: ({Math.round(selectedMeasurement.start.x)}, {Math.round(selectedMeasurement.start.y)})
+            </span>
+            <span className="text-xs font-mono text-slate-500">
+              End: ({Math.round(selectedMeasurement.end.x)}, {Math.round(selectedMeasurement.end.y)})
+            </span>
+          </div>
+
+          <button className="btn-danger w-full mt-4" onClick={handleDelete}>
+            <Trash2 size={15} />
+            <span>Delete Measurement</span>
           </button>
         </div>
       )}

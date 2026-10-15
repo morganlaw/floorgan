@@ -57,6 +57,7 @@ export const Toolbar: React.FC<Props> = ({
           doors: [],
           windows: [],
           furniture: [],
+          measurements: [],
           unit: 'm',
           gridSnap: true,
           gridSize: 20,
