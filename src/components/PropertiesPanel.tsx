@@ -515,49 +515,87 @@ export const PropertiesPanel: React.FC<Props> = ({
             </div>
           </div>
 
-          {/* Dimensions */}
-          <div className="field-row">
-            <div className="field-group flex-1">
-              <label className="field-label">Width ({state.unit})</label>
-              <input
-                type="number"
-                min="20"
-                step="5"
-                value={
-                  state.unit === 'm'
-                    ? (selectedTextBox.width / 100).toFixed(2)
-                    : (selectedTextBox.width / 2.54 / 12).toFixed(1)
-                }
-                onChange={(e) => {
-                  const val = parseFloat(e.target.value);
-                  if (!isNaN(val) && val > 0) {
-                    const cm = state.unit === 'm' ? val * 100 : val * 12 * 2.54;
-                    updateTextBox({ width: Math.round(cm) });
-                  }
+          {/* Dimensions & Resizing */}
+          <div className="field-group">
+            <div className="flex justify-between items-center mb-1">
+              <label className="field-label mb-0">Dimensions</label>
+              <button
+                className="text-xs text-blue-600 hover:text-blue-800 font-medium cursor-pointer"
+                onClick={() => {
+                  const rawLines = (selectedTextBox.text || '').split('\n');
+                  const maxLineLen = Math.max(...rawLines.map((l) => l.length), 4);
+                  const fontSize = selectedTextBox.fontSize || 16;
+                  const lineCount = Math.max(rawLines.length, 1);
+                  const fittedW = Math.max(60, Math.round(maxLineLen * fontSize * 0.65 + 30));
+                  const fittedH = Math.max(30, Math.round(lineCount * fontSize * 1.35 + 20));
+                  updateTextBox({ width: fittedW, height: fittedH });
                 }}
-                className="field-input"
-              />
+                title="Automatically resize box to fit text content"
+              >
+                Auto-fit to Text
+              </button>
             </div>
-            <div className="field-group flex-1">
-              <label className="field-label">Height ({state.unit})</label>
-              <input
-                type="number"
-                min="15"
-                step="5"
-                value={
-                  state.unit === 'm'
-                    ? (selectedTextBox.height / 100).toFixed(2)
-                    : (selectedTextBox.height / 2.54 / 12).toFixed(1)
-                }
-                onChange={(e) => {
-                  const val = parseFloat(e.target.value);
-                  if (!isNaN(val) && val > 0) {
-                    const cm = state.unit === 'm' ? val * 100 : val * 12 * 2.54;
-                    updateTextBox({ height: Math.round(cm) });
+            <div className="field-row">
+              <div className="field-group flex-1">
+                <label className="field-label">Width ({state.unit})</label>
+                <input
+                  type="number"
+                  min="20"
+                  step={state.unit === 'm' ? '0.05' : '0.25'}
+                  value={
+                    state.unit === 'm'
+                      ? (selectedTextBox.width / 100).toFixed(2)
+                      : (selectedTextBox.width / 2.54 / 12).toFixed(1)
                   }
-                }}
-                className="field-input"
-              />
+                  onChange={(e) => {
+                    const val = parseFloat(e.target.value);
+                    if (!isNaN(val) && val > 0) {
+                      const cm = state.unit === 'm' ? val * 100 : val * 12 * 2.54;
+                      updateTextBox({ width: Math.round(cm) });
+                    }
+                  }}
+                  className="field-input"
+                />
+              </div>
+              <div className="field-group flex-1">
+                <label className="field-label">Height ({state.unit})</label>
+                <input
+                  type="number"
+                  min="15"
+                  step={state.unit === 'm' ? '0.05' : '0.25'}
+                  value={
+                    state.unit === 'm'
+                      ? (selectedTextBox.height / 100).toFixed(2)
+                      : (selectedTextBox.height / 2.54 / 12).toFixed(1)
+                  }
+                  onChange={(e) => {
+                    const val = parseFloat(e.target.value);
+                    if (!isNaN(val) && val > 0) {
+                      const cm = state.unit === 'm' ? val * 100 : val * 12 * 2.54;
+                      updateTextBox({ height: Math.round(cm) });
+                    }
+                  }}
+                  className="field-input"
+                />
+              </div>
+            </div>
+            {/* Quick Size Presets */}
+            <div className="flex gap-1 mt-1">
+              {[
+                { label: 'Small', w: 100, h: 40 },
+                { label: 'Medium', w: 140, h: 55 },
+                { label: 'Large', w: 200, h: 70 },
+                { label: 'Card', w: 180, h: 110 },
+              ].map((p) => (
+                <button
+                  key={p.label}
+                  className="btn-secondary text-[11px] py-1 px-1 flex-1 text-center"
+                  onClick={() => updateTextBox({ width: p.w, height: p.h })}
+                  title={`Resize to ${formatDimension(p.w, state.unit)} × ${formatDimension(p.h, state.unit)}`}
+                >
+                  {p.label}
+                </button>
+              ))}
             </div>
           </div>
 

@@ -35,6 +35,36 @@ interface Props {
   onEndInteraction?: () => void;
 }
 
+function wrapTextBoxLines(text: string, fontSize: number, maxLineWidth: number): string[] {
+  const rawParagraphs = (text || '').split('\n');
+  const avgCharWidth = fontSize * 0.58;
+  const maxCharsPerLine = Math.max(1, Math.floor(maxLineWidth / avgCharWidth));
+
+  const result: string[] = [];
+  for (const paragraph of rawParagraphs) {
+    if (paragraph.length <= maxCharsPerLine) {
+      result.push(paragraph);
+      continue;
+    }
+    const words = paragraph.split(' ');
+    let currentLine = '';
+    for (const word of words) {
+      if (!currentLine) {
+        currentLine = word;
+      } else if ((currentLine + ' ' + word).length <= maxCharsPerLine) {
+        currentLine += ' ' + word;
+      } else {
+        result.push(currentLine);
+        currentLine = word;
+      }
+    }
+    if (currentLine) {
+      result.push(currentLine);
+    }
+  }
+  return result.length > 0 ? result : [''];
+}
+
 export const FloorplanCanvas: React.FC<Props> = ({
   state,
   setState,
@@ -80,7 +110,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
   const [resizeTarget, setResizeTarget] = useState<{
     id: string;
     type: 'door' | 'window' | 'furniture' | 'textbox';
-    handle: 'left' | 'right' | 'top' | 'bottom';
+    handle: 'left' | 'right' | 'top' | 'bottom' | 'nw' | 'ne' | 'se' | 'sw';
   } | null>(null);
 
   // Measure tool
@@ -406,36 +436,115 @@ export const FloorplanCanvas: React.FC<Props> = ({
           const rad = (tb.rotation * Math.PI) / 180;
           const ux = Math.cos(rad);
           const uy = Math.sin(rad);
-          const dx = worldPoint.x - tb.x;
-          const dy = worldPoint.y - tb.y;
+          const vx = -Math.sin(rad);
+          const vy = Math.cos(rad);
 
-          if (resizeTarget.handle === 'left' || resizeTarget.handle === 'right') {
-            const proj = dx * ux + dy * uy;
-            let half = Math.abs(proj);
+          const curW = tb.width;
+          const curH = tb.height;
+          const halfW = curW / 2;
+          const halfH = curH / 2;
+
+          let newWidth = curW;
+          let newHeight = curH;
+          let newCenterX = tb.x;
+          let newCenterY = tb.y;
+
+          const snapDim = (val: number, minVal: number) => {
+            let res = Math.max(minVal, val);
             if (state.gridSnap) {
-              half = Math.max(15, Math.round(half / (state.gridSize / 2)) * (state.gridSize / 2));
+              res = Math.max(minVal, Math.round(res / state.gridSize) * state.gridSize);
             }
-            const newWidth = Math.max(40, Math.round(half * 2));
-            setState((prev) => ({
-              ...prev,
-              textBoxes: (prev.textBoxes || []).map((t) =>
-                t.id === selectedId ? { ...t, width: newWidth } : t
-              ),
-            }));
-          } else if (resizeTarget.handle === 'top' || resizeTarget.handle === 'bottom') {
-            const projY = -dx * uy + dy * ux;
-            let half = Math.abs(projY);
-            if (state.gridSnap) {
-              half = Math.max(10, Math.round(half / (state.gridSize / 2)) * (state.gridSize / 2));
-            }
-            const newHeight = Math.max(24, Math.round(half * 2));
-            setState((prev) => ({
-              ...prev,
-              textBoxes: (prev.textBoxes || []).map((t) =>
-                t.id === selectedId ? { ...t, height: newHeight } : t
-              ),
-            }));
+            return res;
+          };
+
+          if (resizeTarget.handle === 'right') {
+            // Anchor left edge
+            const anchorX = tb.x - halfW * ux;
+            const anchorY = tb.y - halfW * uy;
+            const dist = (worldPoint.x - anchorX) * ux + (worldPoint.y - anchorY) * uy;
+            newWidth = snapDim(dist, 40);
+            newCenterX = anchorX + (newWidth / 2) * ux;
+            newCenterY = anchorY + (newWidth / 2) * uy;
+          } else if (resizeTarget.handle === 'left') {
+            // Anchor right edge
+            const anchorX = tb.x + halfW * ux;
+            const anchorY = tb.y + halfW * uy;
+            const dist = (anchorX - worldPoint.x) * ux + (anchorY - worldPoint.y) * uy;
+            newWidth = snapDim(dist, 40);
+            newCenterX = anchorX - (newWidth / 2) * ux;
+            newCenterY = anchorY - (newWidth / 2) * uy;
+          } else if (resizeTarget.handle === 'bottom') {
+            // Anchor top edge
+            const anchorX = tb.x - halfH * vx;
+            const anchorY = tb.y - halfH * vy;
+            const dist = (worldPoint.x - anchorX) * vx + (worldPoint.y - anchorY) * vy;
+            newHeight = snapDim(dist, 24);
+            newCenterX = anchorX + (newHeight / 2) * vx;
+            newCenterY = anchorY + (newHeight / 2) * vy;
+          } else if (resizeTarget.handle === 'top') {
+            // Anchor bottom edge
+            const anchorX = tb.x + halfH * vx;
+            const anchorY = tb.y + halfH * vy;
+            const dist = (anchorX - worldPoint.x) * vx + (anchorY - worldPoint.y) * vy;
+            newHeight = snapDim(dist, 24);
+            newCenterX = anchorX - (newHeight / 2) * vx;
+            newCenterY = anchorY - (newHeight / 2) * vy;
+          } else if (resizeTarget.handle === 'se') {
+            // Bottom-Right: Anchor Top-Left corner (nw)
+            const anchorX = tb.x - halfW * ux - halfH * vx;
+            const anchorY = tb.y - halfW * uy - halfH * vy;
+            const distX = (worldPoint.x - anchorX) * ux + (worldPoint.y - anchorY) * uy;
+            const distY = (worldPoint.x - anchorX) * vx + (worldPoint.y - anchorY) * vy;
+            newWidth = snapDim(distX, 40);
+            newHeight = snapDim(distY, 24);
+            newCenterX = anchorX + (newWidth / 2) * ux + (newHeight / 2) * vx;
+            newCenterY = anchorY + (newWidth / 2) * uy + (newHeight / 2) * vy;
+          } else if (resizeTarget.handle === 'sw') {
+            // Bottom-Left: Anchor Top-Right corner (ne)
+            const anchorX = tb.x + halfW * ux - halfH * vx;
+            const anchorY = tb.y + halfW * uy - halfH * vy;
+            const distX = (anchorX - worldPoint.x) * ux + (anchorY - worldPoint.y) * uy;
+            const distY = (worldPoint.x - anchorX) * vx + (worldPoint.y - anchorY) * vy;
+            newWidth = snapDim(distX, 40);
+            newHeight = snapDim(distY, 24);
+            newCenterX = anchorX - (newWidth / 2) * ux + (newHeight / 2) * vx;
+            newCenterY = anchorY - (newWidth / 2) * uy + (newHeight / 2) * vy;
+          } else if (resizeTarget.handle === 'ne') {
+            // Top-Right: Anchor Bottom-Left corner (sw)
+            const anchorX = tb.x - halfW * ux + halfH * vx;
+            const anchorY = tb.y - halfW * uy + halfH * vy;
+            const distX = (worldPoint.x - anchorX) * ux + (worldPoint.y - anchorY) * uy;
+            const distY = (anchorX - worldPoint.x) * vx + (anchorY - worldPoint.y) * vy;
+            newWidth = snapDim(distX, 40);
+            newHeight = snapDim(distY, 24);
+            newCenterX = anchorX + (newWidth / 2) * ux - (newHeight / 2) * vx;
+            newCenterY = anchorY + (newWidth / 2) * uy - (newHeight / 2) * vy;
+          } else if (resizeTarget.handle === 'nw') {
+            // Top-Left: Anchor Bottom-Right corner (se)
+            const anchorX = tb.x + halfW * ux + halfH * vx;
+            const anchorY = tb.y + halfW * uy + halfH * vy;
+            const distX = (anchorX - worldPoint.x) * ux + (anchorY - worldPoint.y) * uy;
+            const distY = (anchorX - worldPoint.x) * vx + (anchorY - worldPoint.y) * vy;
+            newWidth = snapDim(distX, 40);
+            newHeight = snapDim(distY, 24);
+            newCenterX = anchorX - (newWidth / 2) * ux - (newHeight / 2) * vx;
+            newCenterY = anchorY - (newWidth / 2) * uy - (newHeight / 2) * vy;
           }
+
+          setState((prev) => ({
+            ...prev,
+            textBoxes: (prev.textBoxes || []).map((t) =>
+              t.id === selectedId
+                ? {
+                    ...t,
+                    x: Math.round(newCenterX),
+                    y: Math.round(newCenterY),
+                    width: Math.round(newWidth),
+                    height: Math.round(newHeight),
+                  }
+                : t
+            ),
+          }));
         }
       }
     }
@@ -672,14 +781,26 @@ export const FloorplanCanvas: React.FC<Props> = ({
     setTool('select');
   };
 
-  // Global pointer up listener to reliably release drag, resize, rotate, or pan
+  const handlePointerMoveRef = useRef(handlePointerMove);
+  handlePointerMoveRef.current = handlePointerMove;
+  const handlePointerUpRef = useRef(handlePointerUp);
+  handlePointerUpRef.current = handlePointerUp;
+
+  // Global pointer listeners to reliably handle drag, resize, rotate, or pan across window
   useEffect(() => {
     if (!isDragging && !resizeTarget && !isRotating && !isPanning) return;
-    const onWindowPointerUp = () => {
-      handlePointerUp();
+    const onWindowPointerMove = (e: PointerEvent) => {
+      handlePointerMoveRef.current(e as unknown as React.PointerEvent);
     };
+    const onWindowPointerUp = () => {
+      handlePointerUpRef.current();
+    };
+    window.addEventListener('pointermove', onWindowPointerMove);
     window.addEventListener('pointerup', onWindowPointerUp);
-    return () => window.removeEventListener('pointerup', onWindowPointerUp);
+    return () => {
+      window.removeEventListener('pointermove', onWindowPointerMove);
+      window.removeEventListener('pointerup', onWindowPointerUp);
+    };
   }, [isDragging, resizeTarget, isRotating, isPanning]);
 
   // Keyboard shortcuts (Escape, Backspace, Delete)
@@ -1598,9 +1719,9 @@ export const FloorplanCanvas: React.FC<Props> = ({
             const isSelected = selectedId === item.id;
             const halfW = item.width / 2;
             const halfH = item.height / 2;
-            const lines = (item.text || '').split('\n');
-            const lineCount = lines.length;
             const fontSize = item.fontSize || 16;
+            const lines = wrapTextBoxLines(item.text, fontSize, Math.max(20, item.width - 24));
+            const lineCount = lines.length;
             const lineHeight = fontSize * 1.3;
             const textBlockHeight = (lineCount - 1) * lineHeight;
 
@@ -1973,113 +2094,244 @@ export const FloorplanCanvas: React.FC<Props> = ({
             </g>
           )}
 
-          {/* Selection Box, Edge Resizing & 360 Rotation for Selected Text Box */}
-          {selectedTextBox && (
-            <g
-              transform={`translate(${selectedTextBox.x}, ${selectedTextBox.y}) rotate(${selectedTextBox.rotation})`}
-            >
-              <rect
-                x={-selectedTextBox.width / 2 - 5}
-                y={-selectedTextBox.height / 2 - 5}
-                width={selectedTextBox.width + 10}
-                height={selectedTextBox.height + 10}
-                fill="none"
-                stroke="#2563eb"
-                strokeWidth="1.8"
-                strokeDasharray="6 3"
-                rx={(selectedTextBox.borderRadius ?? 6) + 3}
-              />
-
-              {/* Left Edge Resize Handle */}
-              <rect
-                x={-selectedTextBox.width / 2 - 9}
-                y="-10"
-                width="8"
-                height="20"
-                rx="2"
-                fill="#2563eb"
-                stroke="#ffffff"
-                strokeWidth="1.5"
-                className="cursor-ew-resize"
-                onPointerDown={(e) => {
-                  e.stopPropagation();
-                  onStartInteraction?.();
-                  setResizeTarget({ id: selectedTextBox.id, type: 'textbox', handle: 'left' });
-                }}
-              />
-              {/* Right Edge Resize Handle */}
-              <rect
-                x={selectedTextBox.width / 2 + 1}
-                y="-10"
-                width="8"
-                height="20"
-                rx="2"
-                fill="#2563eb"
-                stroke="#ffffff"
-                strokeWidth="1.5"
-                className="cursor-ew-resize"
-                onPointerDown={(e) => {
-                  e.stopPropagation();
-                  onStartInteraction?.();
-                  setResizeTarget({ id: selectedTextBox.id, type: 'textbox', handle: 'right' });
-                }}
-              />
-              {/* Bottom Edge Resize Handle */}
-              <rect
-                x="-10"
-                y={selectedTextBox.height / 2 + 1}
-                width="20"
-                height="8"
-                rx="2"
-                fill="#2563eb"
-                stroke="#ffffff"
-                strokeWidth="1.5"
-                className="cursor-ns-resize"
-                onPointerDown={(e) => {
-                  e.stopPropagation();
-                  onStartInteraction?.();
-                  setResizeTarget({ id: selectedTextBox.id, type: 'textbox', handle: 'bottom' });
-                }}
-              />
-
-              {/* Dimension indicators on edges */}
-              <text
-                x="0"
-                y={-selectedTextBox.height / 2 - 10}
-                textAnchor="middle"
-                fontSize="10"
-                fontWeight="bold"
-                fill="#2563eb"
-                fontFamily="monospace"
+          {/* Selection Box, 8-Point Edge & Corner Resizing & 360 Rotation for Selected Text Box */}
+          {selectedTextBox && (() => {
+            const halfW = selectedTextBox.width / 2;
+            const halfH = selectedTextBox.height / 2;
+            return (
+              <g
+                transform={`translate(${selectedTextBox.x}, ${selectedTextBox.y}) rotate(${selectedTextBox.rotation})`}
               >
-                {formatDimension(selectedTextBox.width, state.unit)} × {formatDimension(selectedTextBox.height, state.unit)}
-              </text>
+                {/* Bounding dashed border */}
+                <rect
+                  x={-halfW - 4}
+                  y={-halfH - 4}
+                  width={selectedTextBox.width + 8}
+                  height={selectedTextBox.height + 8}
+                  fill="none"
+                  stroke="#2563eb"
+                  strokeWidth="1.8"
+                  strokeDasharray="6 3"
+                  rx={(selectedTextBox.borderRadius ?? 6) + 3}
+                />
 
-              {/* 360 Rotation Handle */}
-              <line
-                x1="0"
-                y1={-selectedTextBox.height / 2 - 5}
-                x2="0"
-                y2={-selectedTextBox.height / 2 - 32}
-                stroke="#2563eb"
-                strokeWidth="1.8"
-              />
-              <circle
-                cx="0"
-                cy={-selectedTextBox.height / 2 - 32}
-                r="7"
-                fill="#2563eb"
-                stroke="#ffffff"
-                strokeWidth="2"
-                className="cursor-grab active:cursor-grabbing"
-                onPointerDown={(e) => {
-                  e.stopPropagation();
-                  onStartInteraction?.();
-                  setIsRotating(true);
-                }}
-              />
-            </g>
-          )}
+                {/* 4 Corner Resize Handles */}
+                {/* Top-Left (NW) */}
+                <g
+                  className="cursor-nwse-resize"
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    onStartInteraction?.();
+                    setResizeTarget({ id: selectedTextBox.id, type: 'textbox', handle: 'nw' });
+                  }}
+                >
+                  <circle cx={-halfW} cy={-halfH} r="12" fill="transparent" />
+                  <rect
+                    x={-halfW - 5}
+                    y={-halfH - 5}
+                    width="10"
+                    height="10"
+                    rx="2"
+                    fill="#ffffff"
+                    stroke="#2563eb"
+                    strokeWidth="2"
+                  />
+                </g>
+
+                {/* Top-Right (NE) */}
+                <g
+                  className="cursor-nesw-resize"
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    onStartInteraction?.();
+                    setResizeTarget({ id: selectedTextBox.id, type: 'textbox', handle: 'ne' });
+                  }}
+                >
+                  <circle cx={halfW} cy={-halfH} r="12" fill="transparent" />
+                  <rect
+                    x={halfW - 5}
+                    y={-halfH - 5}
+                    width="10"
+                    height="10"
+                    rx="2"
+                    fill="#ffffff"
+                    stroke="#2563eb"
+                    strokeWidth="2"
+                  />
+                </g>
+
+                {/* Bottom-Right (SE) */}
+                <g
+                  className="cursor-nwse-resize"
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    onStartInteraction?.();
+                    setResizeTarget({ id: selectedTextBox.id, type: 'textbox', handle: 'se' });
+                  }}
+                >
+                  <circle cx={halfW} cy={halfH} r="12" fill="transparent" />
+                  <rect
+                    x={halfW - 5}
+                    y={halfH - 5}
+                    width="10"
+                    height="10"
+                    rx="2"
+                    fill="#ffffff"
+                    stroke="#2563eb"
+                    strokeWidth="2"
+                  />
+                </g>
+
+                {/* Bottom-Left (SW) */}
+                <g
+                  className="cursor-nesw-resize"
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    onStartInteraction?.();
+                    setResizeTarget({ id: selectedTextBox.id, type: 'textbox', handle: 'sw' });
+                  }}
+                >
+                  <circle cx={-halfW} cy={halfH} r="12" fill="transparent" />
+                  <rect
+                    x={-halfW - 5}
+                    y={halfH - 5}
+                    width="10"
+                    height="10"
+                    rx="2"
+                    fill="#ffffff"
+                    stroke="#2563eb"
+                    strokeWidth="2"
+                  />
+                </g>
+
+                {/* 4 Edge Midpoint Handles */}
+                {/* Left Edge Handle */}
+                <g
+                  className="cursor-ew-resize"
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    onStartInteraction?.();
+                    setResizeTarget({ id: selectedTextBox.id, type: 'textbox', handle: 'left' });
+                  }}
+                >
+                  <rect x={-halfW - 10} y="-12" width="18" height="24" fill="transparent" />
+                  <rect
+                    x={-halfW - 4}
+                    y="-9"
+                    width="8"
+                    height="18"
+                    rx="3"
+                    fill="#ffffff"
+                    stroke="#2563eb"
+                    strokeWidth="2"
+                  />
+                </g>
+
+                {/* Right Edge Handle */}
+                <g
+                  className="cursor-ew-resize"
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    onStartInteraction?.();
+                    setResizeTarget({ id: selectedTextBox.id, type: 'textbox', handle: 'right' });
+                  }}
+                >
+                  <rect x={halfW - 8} y="-12" width="18" height="24" fill="transparent" />
+                  <rect
+                    x={halfW - 4}
+                    y="-9"
+                    width="8"
+                    height="18"
+                    rx="3"
+                    fill="#ffffff"
+                    stroke="#2563eb"
+                    strokeWidth="2"
+                  />
+                </g>
+
+                {/* Top Edge Handle */}
+                <g
+                  className="cursor-ns-resize"
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    onStartInteraction?.();
+                    setResizeTarget({ id: selectedTextBox.id, type: 'textbox', handle: 'top' });
+                  }}
+                >
+                  <rect x="-12" y={-halfH - 10} width="24" height="18" fill="transparent" />
+                  <rect
+                    x="-9"
+                    y={-halfH - 4}
+                    width="18"
+                    height="8"
+                    rx="3"
+                    fill="#ffffff"
+                    stroke="#2563eb"
+                    strokeWidth="2"
+                  />
+                </g>
+
+                {/* Bottom Edge Handle */}
+                <g
+                  className="cursor-ns-resize"
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    onStartInteraction?.();
+                    setResizeTarget({ id: selectedTextBox.id, type: 'textbox', handle: 'bottom' });
+                  }}
+                >
+                  <rect x="-12" y={halfH - 8} width="24" height="18" fill="transparent" />
+                  <rect
+                    x="-9"
+                    y={halfH - 4}
+                    width="18"
+                    height="8"
+                    rx="3"
+                    fill="#ffffff"
+                    stroke="#2563eb"
+                    strokeWidth="2"
+                  />
+                </g>
+
+                {/* Dimension indicators on top */}
+                <text
+                  x="0"
+                  y={-halfH - 12}
+                  textAnchor="middle"
+                  fontSize="10"
+                  fontWeight="bold"
+                  fill="#2563eb"
+                  fontFamily="monospace"
+                >
+                  {formatDimension(selectedTextBox.width, state.unit)} × {formatDimension(selectedTextBox.height, state.unit)}
+                </text>
+
+                {/* 360 Rotation Handle */}
+                <line
+                  x1="0"
+                  y1={-halfH - 5}
+                  x2="0"
+                  y2={-halfH - 32}
+                  stroke="#2563eb"
+                  strokeWidth="1.8"
+                />
+                <circle
+                  cx="0"
+                  cy={-halfH - 32}
+                  r="7"
+                  fill="#2563eb"
+                  stroke="#ffffff"
+                  strokeWidth="2"
+                  className="cursor-grab active:cursor-grabbing"
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    onStartInteraction?.();
+                    setIsRotating(true);
+                  }}
+                />
+              </g>
+            );
+          })()}
 
           {/* Placed Persistent Measurements */}
           {state.measurements.map((m) => {

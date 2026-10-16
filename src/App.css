@@ -1203,6 +1203,10 @@ kbd {
   cursor: nwse-resize;
 }
 
+.cursor-nesw-resize {
+  cursor: nesw-resize;
+}
+
 /* ---------- Custom catalog items ---------- */
 .chip-count {
   font-size: 9px;
