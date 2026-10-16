@@ -624,7 +624,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   y={-halfD}
                   width={item.width}
                   height={item.depth}
-                  rx={item.iconType === 'table_round' ? halfW : 6}
+                  rx={item.iconType === 'table_round' ? halfW : 0}
                   fill={item.color}
                   fillOpacity="0.88"
                   stroke={isSelected ? '#2563eb' : '#0f172a'}

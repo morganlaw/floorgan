@@ -120,7 +120,7 @@ export const Sidebar: React.FC<Props> = ({
                   width: Math.min(Math.max((item.width / 220) * 54, 24), 60),
                   height: Math.min(Math.max((item.depth / 220) * 54, 18), 50),
                   backgroundColor: item.color,
-                  borderRadius: 4,
+                  borderRadius: item.iconType === 'table_round' ? '50%' : 0,
                 }}
               />
             </div>
