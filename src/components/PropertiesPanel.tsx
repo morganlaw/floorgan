@@ -337,12 +337,30 @@ export const PropertiesPanel: React.FC<Props> = ({
           </div>
 
           <div className="field-group">
-            <label className="field-label">Door Width</label>
+            <label className="field-label">Door Width ({state.unit === 'm' ? 'cm' : 'in'})</label>
             <div className="flex gap-2">
-              {[70, 80, 90].map((w) => (
+              <input
+                type="number"
+                min="30"
+                max="300"
+                value={selectedDoor.width}
+                onChange={(e) => {
+                  const val = parseInt(e.target.value);
+                  if (!isNaN(val) && val > 0) {
+                    setState((prev) => ({
+                      ...prev,
+                      doors: prev.doors.map((d) =>
+                        d.id === selectedDoor.id ? { ...d, width: val } : d
+                      ),
+                    }));
+                  }
+                }}
+                className="field-input flex-1"
+              />
+              {[75, 80, 90].map((w) => (
                 <button
                   key={w}
-                  className={`btn-secondary flex-1 ${selectedDoor.width === w ? 'active' : ''}`}
+                  className={`btn-secondary ${selectedDoor.width === w ? 'active' : ''}`}
                   onClick={() =>
                     setState((prev) => ({
                       ...prev,
@@ -352,14 +370,46 @@ export const PropertiesPanel: React.FC<Props> = ({
                     }))
                   }
                 >
-                  {w} cm
+                  {w}
                 </button>
               ))}
             </div>
           </div>
 
           <div className="field-group">
-            <label className="field-label">Orientation</label>
+            <label className="field-label">Swing Side</label>
+            <div className="flex gap-2">
+              <button
+                className={`btn-secondary flex-1 ${selectedDoor.swingDirection !== 'right' ? 'active' : ''}`}
+                onClick={() =>
+                  setState((prev) => ({
+                    ...prev,
+                    doors: prev.doors.map((d) =>
+                      d.id === selectedDoor.id ? { ...d, swingDirection: 'left' } : d
+                    ),
+                  }))
+                }
+              >
+                Hinge Left
+              </button>
+              <button
+                className={`btn-secondary flex-1 ${selectedDoor.swingDirection === 'right' ? 'active' : ''}`}
+                onClick={() =>
+                  setState((prev) => ({
+                    ...prev,
+                    doors: prev.doors.map((d) =>
+                      d.id === selectedDoor.id ? { ...d, swingDirection: 'right' } : d
+                    ),
+                  }))
+                }
+              >
+                Hinge Right
+              </button>
+            </div>
+          </div>
+
+          <div className="field-group">
+            <label className="field-label">Orientation ({selectedDoor.rotation}°)</label>
             <button className="btn-secondary w-full" onClick={() => handleRotate(90)}>
               <RotateCw size={15} />
               <span>Rotate 90°</span>
@@ -384,12 +434,30 @@ export const PropertiesPanel: React.FC<Props> = ({
           </div>
 
           <div className="field-group">
-            <label className="field-label">Window Width</label>
+            <label className="field-label">Window Width ({state.unit === 'm' ? 'cm' : 'in'})</label>
             <div className="flex gap-2">
+              <input
+                type="number"
+                min="30"
+                max="500"
+                value={selectedWindow.width}
+                onChange={(e) => {
+                  const val = parseInt(e.target.value);
+                  if (!isNaN(val) && val > 0) {
+                    setState((prev) => ({
+                      ...prev,
+                      windows: prev.windows.map((win) =>
+                        win.id === selectedWindow.id ? { ...win, width: val } : win
+                      ),
+                    }));
+                  }
+                }}
+                className="field-input flex-1"
+              />
               {[100, 140, 180].map((w) => (
                 <button
                   key={w}
-                  className={`btn-secondary flex-1 ${selectedWindow.width === w ? 'active' : ''}`}
+                  className={`btn-secondary ${selectedWindow.width === w ? 'active' : ''}`}
                   onClick={() =>
                     setState((prev) => ({
                       ...prev,
@@ -399,16 +467,19 @@ export const PropertiesPanel: React.FC<Props> = ({
                     }))
                   }
                 >
-                  {w} cm
+                  {w}
                 </button>
               ))}
             </div>
           </div>
 
-          <button className="btn-secondary w-full" onClick={() => handleRotate(90)}>
-            <RotateCw size={15} />
-            <span>Rotate 90°</span>
-          </button>
+          <div className="field-group">
+            <label className="field-label">Orientation ({selectedWindow.rotation}°)</label>
+            <button className="btn-secondary w-full" onClick={() => handleRotate(90)}>
+              <RotateCw size={15} />
+              <span>Rotate 90°</span>
+            </button>
+          </div>
 
           <button className="btn-danger w-full mt-4" onClick={handleDelete}>
             <Trash2 size={15} />

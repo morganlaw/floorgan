@@ -136,7 +136,7 @@ export const Toolbar: React.FC<Props> = ({
         <button
           className={`tool-btn ${tool === 'door' ? 'active' : ''}`}
           onClick={() => setTool('door')}
-          title="Place Door (D)"
+          title="Draw Door (D) — Click or drag along wall to draft door opening"
         >
           <DoorOpen size={18} />
           <span>Door</span>
@@ -145,7 +145,7 @@ export const Toolbar: React.FC<Props> = ({
         <button
           className={`tool-btn ${tool === 'window' ? 'active' : ''}`}
           onClick={() => setTool('window')}
-          title="Place Window"
+          title="Draw Window — Click or drag along wall to draft window opening"
         >
           <AppWindow size={18} />
           <span>Window</span>

@@ -55,12 +55,27 @@ export const FloorplanCanvas: React.FC<Props> = ({
   const [wallStart, setWallStart] = useState<Point | null>(null);
   const [wallCurrent, setWallCurrent] = useState<Point | null>(null);
 
+  // Door creation
+  const [doorStart, setDoorStart] = useState<Point | null>(null);
+  const [doorCurrent, setDoorCurrent] = useState<Point | null>(null);
+
+  // Window creation
+  const [windowStart, setWindowStart] = useState<Point | null>(null);
+  const [windowCurrent, setWindowCurrent] = useState<Point | null>(null);
+
   // Dragging placed item
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState<Point>({ x: 0, y: 0 });
 
-  // Rotating placed item
+  // Rotating placed item (furniture, doors, windows)
   const [isRotating, setIsRotating] = useState(false);
+
+  // Resizing placed item (doors, windows, furniture)
+  const [resizeTarget, setResizeTarget] = useState<{
+    id: string;
+    type: 'door' | 'window' | 'furniture';
+    handle: 'left' | 'right' | 'top' | 'bottom';
+  } | null>(null);
 
   // Measure tool
   const [measureStart, setMeasureStart] = useState<Point | null>(null);
@@ -124,7 +139,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
         setWallCurrent(snappedPoint);
       } else {
         // Place wall
-        const finalEnd = e.shiftKey ? snapAngle(wallStart, snappedPoint) : snappedPoint;
+        const finalEnd = snapAngle(wallStart, snappedPoint, state.gridSize, state.gridSnap);
         if (distance(wallStart, finalEnd) > 10) {
           const newWall: Wall = {
             id: 'wall_' + Date.now(),
@@ -133,7 +148,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
             thickness: 15,
           };
           setState((prev) => ({ ...prev, walls: [...prev.walls, newWall] }));
-          // Complete single wall segment and revert to select tool
           setWallStart(null);
           setWallCurrent(null);
           setTool('select');
@@ -142,31 +156,59 @@ export const FloorplanCanvas: React.FC<Props> = ({
         }
       }
     } else if (tool === 'door') {
-      const newDoor: Door = {
-        id: 'door_' + Date.now(),
-        x: snappedPoint.x,
-        y: snappedPoint.y,
-        width: 80,
-        rotation: 0,
-        swingDirection: 'left',
-      };
-      setState((prev) => ({ ...prev, doors: [...prev.doors, newDoor] }));
-      setSelectedId(newDoor.id);
-      setSelectedType('door');
-      setTool('select');
+      if (!doorStart) {
+        setDoorStart(snappedPoint);
+        setDoorCurrent(snappedPoint);
+      } else {
+        const finalEnd = snapAngle(doorStart, snappedPoint, state.gridSize, state.gridSnap);
+        const dist = distance(doorStart, finalEnd);
+        if (dist >= 30) {
+          const mid = { x: (doorStart.x + finalEnd.x) / 2, y: (doorStart.y + finalEnd.y) / 2 };
+          const angleRad = Math.atan2(finalEnd.y - doorStart.y, finalEnd.x - doorStart.x);
+          const angleDeg = Math.round((angleRad * 180) / Math.PI);
+          const newDoor: Door = {
+            id: 'door_' + Date.now(),
+            x: Math.round(mid.x),
+            y: Math.round(mid.y),
+            width: Math.round(dist),
+            rotation: (angleDeg + 360) % 360,
+            swingDirection: 'left',
+          };
+          setState((prev) => ({ ...prev, doors: [...prev.doors, newDoor] }));
+          setDoorStart(null);
+          setDoorCurrent(null);
+          setTool('select');
+          setSelectedId(newDoor.id);
+          setSelectedType('door');
+        }
+      }
     } else if (tool === 'window') {
-      const newWin: WindowItem = {
-        id: 'win_' + Date.now(),
-        x: snappedPoint.x,
-        y: snappedPoint.y,
-        width: 120,
-        thickness: 15,
-        rotation: 0,
-      };
-      setState((prev) => ({ ...prev, windows: [...prev.windows, newWin] }));
-      setSelectedId(newWin.id);
-      setSelectedType('window');
-      setTool('select');
+      if (!windowStart) {
+        setWindowStart(snappedPoint);
+        setWindowCurrent(snappedPoint);
+      } else {
+        const finalEnd = snapAngle(windowStart, snappedPoint, state.gridSize, state.gridSnap);
+        const dist = distance(windowStart, finalEnd);
+        if (dist >= 30) {
+          const mid = { x: (windowStart.x + finalEnd.x) / 2, y: (windowStart.y + finalEnd.y) / 2 };
+          const angleRad = Math.atan2(finalEnd.y - windowStart.y, finalEnd.x - windowStart.x);
+          const angleDeg = Math.round((angleRad * 180) / Math.PI);
+          const newWin: WindowItem = {
+            id: 'win_' + Date.now(),
+            x: Math.round(mid.x),
+            y: Math.round(mid.y),
+            width: Math.round(dist),
+            thickness: 15,
+            rotation: (angleDeg + 360) % 360,
+          };
+          setState((prev) => ({ ...prev, windows: [...prev.windows, newWin] }));
+          setWindowStart(null);
+          setWindowCurrent(null);
+          setTool('select');
+          setSelectedId(newWin.id);
+          setSelectedType('window');
+        }
+      }
     } else if (tool === 'measure') {
       if (!measureStart) {
         setMeasureStart(snappedPoint);
@@ -229,7 +271,15 @@ export const FloorplanCanvas: React.FC<Props> = ({
     const snappedPoint = snapPointToGrid(worldPoint, state.gridSize, state.gridSnap);
 
     if (tool === 'wall' && wallStart) {
-      setWallCurrent(e.shiftKey ? snapAngle(wallStart, snappedPoint) : snappedPoint);
+      setWallCurrent(snapAngle(wallStart, snappedPoint, state.gridSize, state.gridSnap));
+    }
+
+    if (tool === 'door' && doorStart) {
+      setDoorCurrent(snapAngle(doorStart, snappedPoint, state.gridSize, state.gridSnap));
+    }
+
+    if (tool === 'window' && windowStart) {
+      setWindowCurrent(snapAngle(windowStart, snappedPoint, state.gridSize, state.gridSnap));
     }
 
     if (tool === 'measure' && measureStart) {
@@ -237,59 +287,195 @@ export const FloorplanCanvas: React.FC<Props> = ({
     }
 
     if (tool === 'calibrate' && calibStart) {
-      setCalibEnd(e.shiftKey ? snapAngle(calibStart, snappedPoint) : snappedPoint);
+      setCalibEnd(snapAngle(calibStart, snappedPoint, state.gridSize, state.gridSnap));
     }
 
-    if (isDragging && selectedId) {
-      const targetX = snapPointToGrid(
-        { x: worldPoint.x - dragOffset.x, y: worldPoint.y - dragOffset.y },
-        state.gridSize,
-        state.gridSnap
-      );
+    // Dynamic Edge / Width Resizing by dragging handles
+    if (resizeTarget && selectedId) {
+      if (resizeTarget.type === 'door') {
+        const door = state.doors.find((d) => d.id === selectedId);
+        if (door) {
+          const rad = (door.rotation * Math.PI) / 180;
+          const ux = Math.cos(rad);
+          const uy = Math.sin(rad);
+          const dx = worldPoint.x - door.x;
+          const dy = worldPoint.y - door.y;
+          const proj = dx * ux + dy * uy;
+          let half = Math.abs(proj);
+          if (state.gridSnap) {
+            half = Math.max(15, Math.round(half / (state.gridSize / 2)) * (state.gridSize / 2));
+          }
+          const newWidth = Math.max(30, Math.round(half * 2));
+          setState((prev) => ({
+            ...prev,
+            doors: prev.doors.map((d) => (d.id === selectedId ? { ...d, width: newWidth } : d)),
+          }));
+        }
+      } else if (resizeTarget.type === 'window') {
+        const win = state.windows.find((w) => w.id === selectedId);
+        if (win) {
+          const rad = (win.rotation * Math.PI) / 180;
+          const ux = Math.cos(rad);
+          const uy = Math.sin(rad);
+          const dx = worldPoint.x - win.x;
+          const dy = worldPoint.y - win.y;
+          const proj = dx * ux + dy * uy;
+          let half = Math.abs(proj);
+          if (state.gridSnap) {
+            half = Math.max(15, Math.round(half / (state.gridSize / 2)) * (state.gridSize / 2));
+          }
+          const newWidth = Math.max(30, Math.round(half * 2));
+          setState((prev) => ({
+            ...prev,
+            windows: prev.windows.map((w) => (w.id === selectedId ? { ...w, width: newWidth } : w)),
+          }));
+        }
+      } else if (resizeTarget.type === 'furniture') {
+        const furn = state.furniture.find((f) => f.id === selectedId);
+        if (furn) {
+          const rad = (furn.rotation * Math.PI) / 180;
+          const ux = Math.cos(rad);
+          const uy = Math.sin(rad);
+          const dx = worldPoint.x - furn.x;
+          const dy = worldPoint.y - furn.y;
 
-      if (selectedType === 'furniture') {
-        setState((prev) => ({
-          ...prev,
-          furniture: prev.furniture.map((item) =>
-            item.id === selectedId ? { ...item, x: targetX.x, y: targetX.y } : item
-          ),
-        }));
-      } else if (selectedType === 'door') {
-        setState((prev) => ({
-          ...prev,
-          doors: prev.doors.map((item) =>
-            item.id === selectedId ? { ...item, x: targetX.x, y: targetX.y } : item
-          ),
-        }));
-      } else if (selectedType === 'window') {
-        setState((prev) => ({
-          ...prev,
-          windows: prev.windows.map((item) =>
-            item.id === selectedId ? { ...item, x: targetX.x, y: targetX.y } : item
-          ),
-        }));
+          if (resizeTarget.handle === 'left' || resizeTarget.handle === 'right') {
+            const proj = dx * ux + dy * uy;
+            let half = Math.abs(proj);
+            if (state.gridSnap) {
+              half = Math.max(15, Math.round(half / (state.gridSize / 2)) * (state.gridSize / 2));
+            }
+            const newWidth = Math.max(30, Math.round(half * 2));
+            setState((prev) => ({
+              ...prev,
+              furniture: prev.furniture.map((f) =>
+                f.id === selectedId ? { ...f, width: newWidth } : f
+              ),
+            }));
+          } else if (resizeTarget.handle === 'top' || resizeTarget.handle === 'bottom') {
+            const projY = -dx * uy + dy * ux;
+            let half = Math.abs(projY);
+            if (state.gridSnap) {
+              half = Math.max(15, Math.round(half / (state.gridSize / 2)) * (state.gridSize / 2));
+            }
+            const newDepth = Math.max(30, Math.round(half * 2));
+            setState((prev) => ({
+              ...prev,
+              furniture: prev.furniture.map((f) =>
+                f.id === selectedId ? { ...f, depth: newDepth } : f
+              ),
+            }));
+          }
+        }
       }
     }
 
-    if (isRotating && selectedId && selectedType === 'furniture') {
-      const item = state.furniture.find((f) => f.id === selectedId);
-      if (item) {
-        const dx = worldPoint.x - item.x;
-        const dy = worldPoint.y - item.y;
+    // Dragging placed elements with grid edge-alignment
+    if (isDragging && selectedId && !resizeTarget) {
+      if (selectedType === 'furniture') {
+        const item = state.furniture.find((f) => f.id === selectedId);
+        if (item) {
+          let newX = worldPoint.x - dragOffset.x;
+          let newY = worldPoint.y - dragOffset.y;
+          if (state.gridSnap) {
+            const isRotated90 = Math.abs(Math.round(item.rotation / 90) % 2) === 1;
+            const effHalfW = isRotated90 ? item.depth / 2 : item.width / 2;
+            const effHalfD = isRotated90 ? item.width / 2 : item.depth / 2;
+            const left = Math.round((newX - effHalfW) / state.gridSize) * state.gridSize;
+            const top = Math.round((newY - effHalfD) / state.gridSize) * state.gridSize;
+            newX = left + effHalfW;
+            newY = top + effHalfD;
+          }
+          setState((prev) => ({
+            ...prev,
+            furniture: prev.furniture.map((f) =>
+              f.id === selectedId ? { ...f, x: newX, y: newY } : f
+            ),
+          }));
+        }
+      } else if (selectedType === 'door') {
+        const item = state.doors.find((d) => d.id === selectedId);
+        if (item) {
+          let newX = worldPoint.x - dragOffset.x;
+          let newY = worldPoint.y - dragOffset.y;
+          if (state.gridSnap) {
+            newX = Math.round(newX / (state.gridSize / 2)) * (state.gridSize / 2);
+            newY = Math.round(newY / (state.gridSize / 2)) * (state.gridSize / 2);
+          }
+          setState((prev) => ({
+            ...prev,
+            doors: prev.doors.map((d) =>
+              d.id === selectedId ? { ...d, x: newX, y: newY } : d
+            ),
+          }));
+        }
+      } else if (selectedType === 'window') {
+        const item = state.windows.find((w) => w.id === selectedId);
+        if (item) {
+          let newX = worldPoint.x - dragOffset.x;
+          let newY = worldPoint.y - dragOffset.y;
+          if (state.gridSnap) {
+            newX = Math.round(newX / (state.gridSize / 2)) * (state.gridSize / 2);
+            newY = Math.round(newY / (state.gridSize / 2)) * (state.gridSize / 2);
+          }
+          setState((prev) => ({
+            ...prev,
+            windows: prev.windows.map((w) =>
+              w.id === selectedId ? { ...w, x: newX, y: newY } : w
+            ),
+          }));
+        }
+      }
+    }
+
+    // 360-degree free rotation for furniture, doors, and windows
+    if (isRotating && selectedId) {
+      let center: Point | null = null;
+      if (selectedType === 'furniture') {
+        const item = state.furniture.find((f) => f.id === selectedId);
+        if (item) center = { x: item.x, y: item.y };
+      } else if (selectedType === 'door') {
+        const item = state.doors.find((d) => d.id === selectedId);
+        if (item) center = { x: item.x, y: item.y };
+      } else if (selectedType === 'window') {
+        const item = state.windows.find((w) => w.id === selectedId);
+        if (item) center = { x: item.x, y: item.y };
+      }
+
+      if (center) {
+        const dx = worldPoint.x - center.x;
+        const dy = worldPoint.y - center.y;
         let angleDeg = Math.round((Math.atan2(dy, dx) * 180) / Math.PI + 90);
         if (angleDeg < 0) angleDeg += 360;
 
-        // Snap to 45 deg if shift is held
         if (e.shiftKey) {
           angleDeg = Math.round(angleDeg / 45) * 45;
         }
 
-        setState((prev) => ({
-          ...prev,
-          furniture: prev.furniture.map((f) =>
-            f.id === selectedId ? { ...f, rotation: angleDeg % 360 } : f
-          ),
-        }));
+        const rot = angleDeg % 360;
+
+        if (selectedType === 'furniture') {
+          setState((prev) => ({
+            ...prev,
+            furniture: prev.furniture.map((f) =>
+              f.id === selectedId ? { ...f, rotation: rot } : f
+            ),
+          }));
+        } else if (selectedType === 'door') {
+          setState((prev) => ({
+            ...prev,
+            doors: prev.doors.map((d) =>
+              d.id === selectedId ? { ...d, rotation: rot } : d
+            ),
+          }));
+        } else if (selectedType === 'window') {
+          setState((prev) => ({
+            ...prev,
+            windows: prev.windows.map((w) =>
+              w.id === selectedId ? { ...w, rotation: rot } : w
+            ),
+          }));
+        }
       }
     }
   };
@@ -299,6 +485,74 @@ export const FloorplanCanvas: React.FC<Props> = ({
     setIsPanning(false);
     setIsDragging(false);
     setIsRotating(false);
+    setResizeTarget(null);
+
+    // Finalize drag-drafting for wall
+    if (tool === 'wall' && wallStart && wallCurrent) {
+      const dist = distance(wallStart, wallCurrent);
+      if (dist >= 15) {
+        const newWall: Wall = {
+          id: 'wall_' + Date.now(),
+          start: wallStart,
+          end: wallCurrent,
+          thickness: 15,
+        };
+        setState((prev) => ({ ...prev, walls: [...prev.walls, newWall] }));
+        setWallStart(null);
+        setWallCurrent(null);
+        setTool('select');
+        setSelectedId(newWall.id);
+        setSelectedType('wall');
+      }
+    }
+
+    // Finalize drag-drafting for door
+    if (tool === 'door' && doorStart && doorCurrent) {
+      const dist = distance(doorStart, doorCurrent);
+      if (dist >= 30) {
+        const mid = { x: (doorStart.x + doorCurrent.x) / 2, y: (doorStart.y + doorCurrent.y) / 2 };
+        const angleRad = Math.atan2(doorCurrent.y - doorStart.y, doorCurrent.x - doorStart.x);
+        const angleDeg = Math.round((angleRad * 180) / Math.PI);
+        const newDoor: Door = {
+          id: 'door_' + Date.now(),
+          x: Math.round(mid.x),
+          y: Math.round(mid.y),
+          width: Math.round(dist),
+          rotation: (angleDeg + 360) % 360,
+          swingDirection: 'left',
+        };
+        setState((prev) => ({ ...prev, doors: [...prev.doors, newDoor] }));
+        setDoorStart(null);
+        setDoorCurrent(null);
+        setTool('select');
+        setSelectedId(newDoor.id);
+        setSelectedType('door');
+      }
+    }
+
+    // Finalize drag-drafting for window
+    if (tool === 'window' && windowStart && windowCurrent) {
+      const dist = distance(windowStart, windowCurrent);
+      if (dist >= 30) {
+        const mid = { x: (windowStart.x + windowCurrent.x) / 2, y: (windowStart.y + windowCurrent.y) / 2 };
+        const angleRad = Math.atan2(windowCurrent.y - windowStart.y, windowCurrent.x - windowStart.x);
+        const angleDeg = Math.round((angleRad * 180) / Math.PI);
+        const newWin: WindowItem = {
+          id: 'win_' + Date.now(),
+          x: Math.round(mid.x),
+          y: Math.round(mid.y),
+          width: Math.round(dist),
+          thickness: 15,
+          rotation: (angleDeg + 360) % 360,
+        };
+        setState((prev) => ({ ...prev, windows: [...prev.windows, newWin] }));
+        setWindowStart(null);
+        setWindowCurrent(null);
+        setTool('select');
+        setSelectedId(newWin.id);
+        setSelectedType('window');
+      }
+    }
   };
 
   const handleApplyCalibration = (e: React.FormEvent) => {
@@ -320,6 +574,10 @@ export const FloorplanCanvas: React.FC<Props> = ({
       if (e.key === 'Escape') {
         setWallStart(null);
         setWallCurrent(null);
+        setDoorStart(null);
+        setDoorCurrent(null);
+        setWindowStart(null);
+        setWindowCurrent(null);
         setMeasureStart(null);
         setMeasureEnd(null);
         setCalibStart(null);
@@ -363,8 +621,10 @@ export const FloorplanCanvas: React.FC<Props> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedId, selectedType, setState, setSelectedId, setSelectedType, setTool]);
 
-  // Selected furniture helper
-  const selectedFurniture = state.furniture.find((f) => f.id === selectedId);
+  // Selected item helpers
+  const selectedFurniture = selectedType === 'furniture' ? state.furniture.find((f) => f.id === selectedId) : null;
+  const selectedDoor = selectedType === 'door' ? state.doors.find((d) => d.id === selectedId) : null;
+  const selectedWindow = selectedType === 'window' ? state.windows.find((w) => w.id === selectedId) : null;
 
   return (
     <div className="canvas-wrapper">
@@ -534,9 +794,82 @@ export const FloorplanCanvas: React.FC<Props> = ({
             </g>
           )}
 
+          {/* Door drawing preview */}
+          {doorStart && doorCurrent && (
+            <g>
+              <line
+                x1={doorStart.x}
+                y1={doorStart.y}
+                x2={doorCurrent.x}
+                y2={doorCurrent.y}
+                stroke="#78350f"
+                strokeWidth="6"
+                strokeLinecap="square"
+              />
+              <circle cx={doorStart.x} cy={doorStart.y} r="5" fill="#78350f" />
+              <circle cx={doorCurrent.x} cy={doorCurrent.y} r="5" fill="#78350f" />
+              {(() => {
+                const dist = distance(doorStart, doorCurrent);
+                const angleRad = Math.atan2(doorCurrent.y - doorStart.y, doorCurrent.x - doorStart.x);
+                const angleDeg = (angleRad * 180) / Math.PI;
+                const midX = (doorStart.x + doorCurrent.x) / 2;
+                const midY = (doorStart.y + doorCurrent.y) / 2;
+                return (
+                  <g transform={`translate(${midX}, ${midY}) rotate(${angleDeg})`}>
+                    <path
+                      d={`M ${dist / 2} 0 A ${dist} ${dist} 0 0 1 ${-dist / 2} ${dist}`}
+                      fill="none"
+                      stroke="#94a3b8"
+                      strokeWidth="1.5"
+                      strokeDasharray="4 3"
+                    />
+                    <line x1={-dist / 2} y1="0" x2={-dist / 2} y2={dist} stroke="#78350f" strokeWidth="3.5" />
+                    <g transform={`translate(0, -18)`}>
+                      <rect x="-34" y="-11" width="68" height="22" rx="4" fill="#1e293b" fillOpacity="0.9" />
+                      <text textAnchor="middle" dominantBaseline="central" fontSize="11" fontWeight="bold" fill="#ffffff" fontFamily="monospace">
+                        {formatDimension(dist, state.unit)}
+                      </text>
+                    </g>
+                  </g>
+                );
+              })()}
+            </g>
+          )}
+
+          {/* Window drawing preview */}
+          {windowStart && windowCurrent && (
+            <g>
+              {(() => {
+                const dist = distance(windowStart, windowCurrent);
+                const angleRad = Math.atan2(windowCurrent.y - windowStart.y, windowCurrent.x - windowStart.x);
+                const angleDeg = (angleRad * 180) / Math.PI;
+                const midX = (windowStart.x + windowCurrent.x) / 2;
+                const midY = (windowStart.y + windowCurrent.y) / 2;
+                return (
+                  <g transform={`translate(${midX}, ${midY}) rotate(${angleDeg})`}>
+                    <rect x={-dist / 2} y="-8" width={dist} height="16" fill="#ffffff" stroke="#0284c7" strokeWidth="2" />
+                    <line x1={-dist / 2} y1="-3" x2={dist / 2} y2="-3" stroke="#38bdf8" strokeWidth="2" />
+                    <line x1={-dist / 2} y1="3" x2={dist / 2} y2="3" stroke="#38bdf8" strokeWidth="2" />
+                    <g transform={`translate(0, -18)`}>
+                      <rect x="-34" y="-11" width="68" height="22" rx="4" fill="#1e293b" fillOpacity="0.9" />
+                      <text textAnchor="middle" dominantBaseline="central" fontSize="11" fontWeight="bold" fill="#ffffff" fontFamily="monospace">
+                        {formatDimension(dist, state.unit)}
+                      </text>
+                    </g>
+                  </g>
+                );
+              })()}
+              <circle cx={windowStart.x} cy={windowStart.y} r="5" fill="#0284c7" />
+              <circle cx={windowCurrent.x} cy={windowCurrent.y} r="5" fill="#0284c7" />
+            </g>
+          )}
+
           {/* Doors */}
           {state.doors.map((door) => {
             const isSelected = selectedId === door.id;
+            const halfW = door.width / 2;
+            const isLeft = door.swingDirection !== 'right';
+
             return (
               <g
                 key={door.id}
@@ -560,33 +893,61 @@ export const FloorplanCanvas: React.FC<Props> = ({
               >
                 {/* Wall Opening Cutout */}
                 <rect
-                  x={-door.width / 2}
-                  y="-12"
+                  x={-halfW}
+                  y="-10"
                   width={door.width}
-                  height="24"
+                  height="20"
                   fill="#ffffff"
-                  stroke={isSelected ? '#3b82f6' : '#cbd5e1'}
-                  strokeWidth="2"
+                  stroke={isSelected ? '#2563eb' : '#94a3b8'}
+                  strokeWidth={isSelected ? '2' : '1'}
                 />
-                {/* Swing arc (quarter circle) */}
-                <path
-                  d={`M ${-door.width / 2} 0 A ${door.width} ${door.width} 0 0 1 ${
-                    -door.width / 2 + door.width
-                  } ${door.width}`}
-                  fill="none"
-                  stroke="#94a3b8"
-                  strokeWidth="1.5"
-                  strokeDasharray="4 3"
-                />
-                {/* Door leaf line */}
-                <line
-                  x1={-door.width / 2}
-                  y1="0"
-                  x2={-door.width / 2}
-                  y2={door.width}
-                  stroke="#78350f"
-                  strokeWidth="4"
-                />
+
+                {/* Jamb Posts on left and right */}
+                <rect x={-halfW} y="-10" width="5" height="20" fill="#334155" />
+                <rect x={halfW - 5} y="-10" width="5" height="20" fill="#334155" />
+
+                {/* Door Swing Arc (Quarter Circle from closed tip to open leaf tip) & Door Leaf */}
+                {isLeft ? (
+                  <>
+                    <path
+                      d={`M ${halfW} 0 A ${door.width} ${door.width} 0 0 1 ${-halfW} ${door.width}`}
+                      fill="none"
+                      stroke="#94a3b8"
+                      strokeWidth="1.5"
+                      strokeDasharray="4 3"
+                    />
+                    <line
+                      x1={-halfW}
+                      y1="0"
+                      x2={-halfW}
+                      y2={door.width}
+                      stroke="#78350f"
+                      strokeWidth="4"
+                      strokeLinecap="round"
+                    />
+                    <circle cx={-halfW} cy="0" r="3" fill="#78350f" />
+                  </>
+                ) : (
+                  <>
+                    <path
+                      d={`M ${-halfW} 0 A ${door.width} ${door.width} 0 0 0 ${halfW} ${door.width}`}
+                      fill="none"
+                      stroke="#94a3b8"
+                      strokeWidth="1.5"
+                      strokeDasharray="4 3"
+                    />
+                    <line
+                      x1={halfW}
+                      y1="0"
+                      x2={halfW}
+                      y2={door.width}
+                      stroke="#78350f"
+                      strokeWidth="4"
+                      strokeLinecap="round"
+                    />
+                    <circle cx={halfW} cy="0" r="3" fill="#78350f" />
+                  </>
+                )}
               </g>
             );
           })}
@@ -594,6 +955,9 @@ export const FloorplanCanvas: React.FC<Props> = ({
           {/* Windows */}
           {state.windows.map((win) => {
             const isSelected = selectedId === win.id;
+            const halfW = win.width / 2;
+            const halfT = win.thickness / 2;
+
             return (
               <g
                 key={win.id}
@@ -615,31 +979,34 @@ export const FloorplanCanvas: React.FC<Props> = ({
                 }}
                 className="cursor-move"
               >
-                {/* Wall opening */}
+                {/* Wall opening cutout */}
                 <rect
-                  x={-win.width / 2}
-                  y={-win.thickness / 2}
+                  x={-halfW}
+                  y={-halfT}
                   width={win.width}
                   height={win.thickness}
                   fill="#ffffff"
-                  stroke={isSelected ? '#3b82f6' : '#64748b'}
-                  strokeWidth="1.5"
+                  stroke={isSelected ? '#2563eb' : '#64748b'}
+                  strokeWidth={isSelected ? '2' : '1.5'}
                 />
+                {/* Window Jamb Caps */}
+                <line x1={-halfW} y1={-halfT} x2={-halfW} y2={halfT} stroke="#334155" strokeWidth="3" />
+                <line x1={halfW} y1={-halfT} x2={halfW} y2={halfT} stroke="#334155" strokeWidth="3" />
                 {/* Double glass panes */}
                 <line
-                  x1={-win.width / 2}
-                  y1={-win.thickness / 4}
-                  x2={win.width / 2}
-                  y2={-win.thickness / 4}
-                  stroke="#38bdf8"
+                  x1={-halfW + 3}
+                  y1={-halfT / 3}
+                  x2={halfW - 3}
+                  y2={-halfT / 3}
+                  stroke="#0284c7"
                   strokeWidth="2"
                 />
                 <line
-                  x1={-win.width / 2}
-                  y1={win.thickness / 4}
-                  x2={win.width / 2}
-                  y2={win.thickness / 4}
-                  stroke="#38bdf8"
+                  x1={-halfW + 3}
+                  y1={halfT / 3}
+                  x2={halfW - 3}
+                  y2={halfT / 3}
+                  stroke="#0284c7"
                   strokeWidth="2"
                 />
               </g>
@@ -1031,7 +1398,170 @@ export const FloorplanCanvas: React.FC<Props> = ({
             );
           })}
 
-          {/* Selection Box & Rotation Handle for Selected Furniture */}
+          {/* Selection Box, Edge Resizing & 360 Rotation for Selected Door */}
+          {selectedDoor && (
+            <g
+              transform={`translate(${selectedDoor.x}, ${selectedDoor.y}) rotate(${selectedDoor.rotation})`}
+            >
+              <rect
+                x={-selectedDoor.width / 2 - 6}
+                y="-16"
+                width={selectedDoor.width + 12}
+                height="32"
+                fill="none"
+                stroke="#2563eb"
+                strokeWidth="1.8"
+                strokeDasharray="6 3"
+                rx="4"
+              />
+              {/* Left Edge Resize Handle */}
+              <rect
+                x={-selectedDoor.width / 2 - 9}
+                y="-12"
+                width="8"
+                height="24"
+                rx="2"
+                fill="#2563eb"
+                stroke="#ffffff"
+                strokeWidth="1.5"
+                className="cursor-ew-resize"
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  setResizeTarget({ id: selectedDoor.id, type: 'door', handle: 'left' });
+                }}
+              />
+              {/* Right Edge Resize Handle */}
+              <rect
+                x={selectedDoor.width / 2 + 1}
+                y="-12"
+                width="8"
+                height="24"
+                rx="2"
+                fill="#2563eb"
+                stroke="#ffffff"
+                strokeWidth="1.5"
+                className="cursor-ew-resize"
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  setResizeTarget({ id: selectedDoor.id, type: 'door', handle: 'right' });
+                }}
+              />
+              {/* Width dimension badge */}
+              <text
+                x="0"
+                y="-26"
+                textAnchor="middle"
+                fontSize="11"
+                fontWeight="bold"
+                fill="#2563eb"
+                fontFamily="monospace"
+              >
+                {formatDimension(selectedDoor.width, state.unit)}
+              </text>
+              {/* 360 Rotation Handle */}
+              <line x1="0" y1="-16" x2="0" y2="-44" stroke="#2563eb" strokeWidth="1.8" />
+              <circle
+                cx="0"
+                cy="-44"
+                r="8"
+                fill="#2563eb"
+                stroke="#ffffff"
+                strokeWidth="2"
+                className="cursor-grab active:cursor-grabbing"
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  setIsRotating(true);
+                }}
+              />
+            </g>
+          )}
+
+          {/* Selection Box, Edge Resizing & 360 Rotation for Selected Window */}
+          {selectedWindow && (
+            <g
+              transform={`translate(${selectedWindow.x}, ${selectedWindow.y}) rotate(${selectedWindow.rotation})`}
+            >
+              <rect
+                x={-selectedWindow.width / 2 - 6}
+                y={-selectedWindow.thickness / 2 - 6}
+                width={selectedWindow.width + 12}
+                height={selectedWindow.thickness + 12}
+                fill="none"
+                stroke="#2563eb"
+                strokeWidth="1.8"
+                strokeDasharray="6 3"
+                rx="4"
+              />
+              {/* Left Edge Resize Handle */}
+              <rect
+                x={-selectedWindow.width / 2 - 9}
+                y="-12"
+                width="8"
+                height="24"
+                rx="2"
+                fill="#2563eb"
+                stroke="#ffffff"
+                strokeWidth="1.5"
+                className="cursor-ew-resize"
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  setResizeTarget({ id: selectedWindow.id, type: 'window', handle: 'left' });
+                }}
+              />
+              {/* Right Edge Resize Handle */}
+              <rect
+                x={selectedWindow.width / 2 + 1}
+                y="-12"
+                width="8"
+                height="24"
+                rx="2"
+                fill="#2563eb"
+                stroke="#ffffff"
+                strokeWidth="1.5"
+                className="cursor-ew-resize"
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  setResizeTarget({ id: selectedWindow.id, type: 'window', handle: 'right' });
+                }}
+              />
+              {/* Width dimension badge */}
+              <text
+                x="0"
+                y={-selectedWindow.thickness / 2 - 14}
+                textAnchor="middle"
+                fontSize="11"
+                fontWeight="bold"
+                fill="#2563eb"
+                fontFamily="monospace"
+              >
+                {formatDimension(selectedWindow.width, state.unit)}
+              </text>
+              {/* 360 Rotation Handle */}
+              <line
+                x1="0"
+                y1={-selectedWindow.thickness / 2 - 6}
+                x2="0"
+                y2={-selectedWindow.thickness / 2 - 34}
+                stroke="#2563eb"
+                strokeWidth="1.8"
+              />
+              <circle
+                cx="0"
+                cy={-selectedWindow.thickness / 2 - 34}
+                r="8"
+                fill="#2563eb"
+                stroke="#ffffff"
+                strokeWidth="2"
+                className="cursor-grab active:cursor-grabbing"
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  setIsRotating(true);
+                }}
+              />
+            </g>
+          )}
+
+          {/* Selection Box, Edge Resizing & Rotation Handle for Selected Furniture */}
           {selectedFurniture && (
             <g
               transform={`translate(${selectedFurniture.x}, ${selectedFurniture.y}) rotate(${selectedFurniture.rotation})`}
@@ -1048,6 +1578,55 @@ export const FloorplanCanvas: React.FC<Props> = ({
                 strokeDasharray="6 3"
               />
 
+              {/* Left Edge Resize Handle */}
+              <rect
+                x={-selectedFurniture.width / 2 - 10}
+                y="-10"
+                width="8"
+                height="20"
+                rx="2"
+                fill="#2563eb"
+                stroke="#ffffff"
+                strokeWidth="1.5"
+                className="cursor-ew-resize"
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  setResizeTarget({ id: selectedFurniture.id, type: 'furniture', handle: 'left' });
+                }}
+              />
+              {/* Right Edge Resize Handle */}
+              <rect
+                x={selectedFurniture.width / 2 + 2}
+                y="-10"
+                width="8"
+                height="20"
+                rx="2"
+                fill="#2563eb"
+                stroke="#ffffff"
+                strokeWidth="1.5"
+                className="cursor-ew-resize"
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  setResizeTarget({ id: selectedFurniture.id, type: 'furniture', handle: 'right' });
+                }}
+              />
+              {/* Bottom Edge Depth Resize Handle */}
+              <rect
+                x="-10"
+                y={selectedFurniture.depth / 2 + 2}
+                width="20"
+                height="8"
+                rx="2"
+                fill="#2563eb"
+                stroke="#ffffff"
+                strokeWidth="1.5"
+                className="cursor-ns-resize"
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  setResizeTarget({ id: selectedFurniture.id, type: 'furniture', handle: 'bottom' });
+                }}
+              />
+
               {/* Dimension indicators on edges */}
               <text
                 x="0"
@@ -1061,7 +1640,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
                 {formatDimension(selectedFurniture.width, state.unit)}
               </text>
               <text
-                x={selectedFurniture.width / 2 + 12}
+                x={selectedFurniture.width / 2 + 16}
                 y="0"
                 textAnchor="start"
                 dominantBaseline="central"
@@ -1325,7 +1904,32 @@ export const FloorplanCanvas: React.FC<Props> = ({
           </form>
         </div>
       )}
+      {/* Bottom Right Grid Cell Scale & Dimension HUD */}
+      <div
+        className="canvas-grid-hud"
+        onClick={() => setState((prev) => ({ ...prev, gridSnap: !prev.gridSnap }))}
+        title="Click to toggle grid snapping"
+        style={{ cursor: 'pointer' }}
+      >
+        <div className="grid-hud-icon">
+          <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+            <rect x="1" y="1" width="9" height="9" stroke="#64748b" strokeWidth="1" strokeDasharray="2 2" fill="rgba(148, 163, 184, 0.2)" />
+            <rect x="12" y="1" width="9" height="9" stroke="#64748b" strokeWidth="1" strokeDasharray="2 2" />
+            <rect x="1" y="12" width="9" height="9" stroke="#64748b" strokeWidth="1" strokeDasharray="2 2" />
+            <rect x="12" y="12" width="9" height="9" stroke="#64748b" strokeWidth="1" strokeDasharray="2 2" />
+          </svg>
+        </div>
+        <div className="grid-hud-details">
+          <span className="grid-hud-title">
+            1 Grid Cell = <strong>{formatDimension(state.gridSize, state.unit)} × {formatDimension(state.gridSize, state.unit)}</strong>
+          </span>
+          <span className="grid-hud-sub">
+            Snap: <span className={state.gridSnap ? 'text-emerald-600 font-semibold' : 'text-slate-400'}>{state.gridSnap ? 'Active' : 'Off'}</span> (Zoom {Math.round(zoom * 100)}%)
+          </span>
+        </div>
+      </div>
     </div>
   );
 };
+
 

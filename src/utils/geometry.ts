@@ -18,20 +18,43 @@ export function distance(p1: Point, p2: Point): number {
   return Math.sqrt(dx * dx + dy * dy);
 }
 
-// Snap an end point to 0, 45, or 90 degrees relative to start point if Shift is pressed
-export function snapAngle(start: Point, current: Point): Point {
+// Snap an end point to 0, 45, or 90 degrees relative to start point with grid length alignment
+export function snapAngle(start: Point, current: Point, gridSize?: number, gridSnap?: boolean): Point {
   const dx = current.x - start.x;
   const dy = current.y - start.y;
-  const angle = Math.atan2(dy, dx);
   const dist = Math.hypot(dx, dy);
+  if (dist === 0) return start;
 
-  // Snap to nearest 45 degrees (PI / 4)
-  const snapIncrement = Math.PI / 4;
+  const angle = Math.atan2(dy, dx);
+  const snapIncrement = Math.PI / 4; // 45 deg
   const snappedAngle = Math.round(angle / snapIncrement) * snapIncrement;
 
+  let finalDist = dist;
+  if (gridSnap && gridSize && gridSize > 0) {
+    finalDist = Math.max(gridSize, Math.round(dist / gridSize) * gridSize);
+  }
+
+  // If strictly horizontal (0 or 180 deg)
+  if (Math.abs(Math.sin(snappedAngle)) < 1e-4) {
+    const sign = Math.cos(snappedAngle) >= 0 ? 1 : -1;
+    return {
+      x: start.x + sign * finalDist,
+      y: start.y,
+    };
+  }
+
+  // If strictly vertical (90 or 270 deg)
+  if (Math.abs(Math.cos(snappedAngle)) < 1e-4) {
+    const sign = Math.sin(snappedAngle) >= 0 ? 1 : -1;
+    return {
+      x: start.x,
+      y: start.y + sign * finalDist,
+    };
+  }
+
   return {
-    x: Math.round(start.x + dist * Math.cos(snappedAngle)),
-    y: Math.round(start.y + dist * Math.sin(snappedAngle)),
+    x: Math.round(start.x + finalDist * Math.cos(snappedAngle)),
+    y: Math.round(start.y + finalDist * Math.sin(snappedAngle)),
   };
 }
 
