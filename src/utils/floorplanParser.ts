@@ -10,15 +10,15 @@ import {
 } from '../types';
 
 export interface ParseOptions {
-  /** 0 = Auto (Otsu threshold), 1..250 = manual darkness threshold */
+  /** 0 = Auto threshold, 1..250 = manual darkness threshold */
   threshold: number;
-  /** Minimum wall thickness in processing pixels (filters thin text, dimension lines, furniture outlines) */
+  /** Minimum wall thickness in processing pixels (filters thin text, toilets, sinks, counters) */
   minWallThicknessPx: number;
   /** Minimum wall segment length in cm */
   minWallLengthCm: number;
   /** Target real-world width of the floorplan bounding box in meters */
   targetWidthMeters: number;
-  /** Fill double-line hollow walls before erosion */
+  /** Fill double-line hollow walls before erosion (only for unpainted CAD double-line plans) */
   closeHollowWalls: boolean;
   /** Detect doors and windows in collinear wall gaps */
   detectOpenings: boolean;
@@ -28,10 +28,10 @@ export interface ParseOptions {
 
 export const DEFAULT_PARSE_OPTIONS: ParseOptions = {
   threshold: 0,
-  minWallThicknessPx: 3,
+  minWallThicknessPx: 4,
   minWallLengthCm: 70,
   targetWidthMeters: 10,
-  closeHollowWalls: true,
+  closeHollowWalls: false,
   detectOpenings: true,
   invert: false,
 };
@@ -68,6 +68,13 @@ export interface RawRoomNameCandidate {
   cyPx: number;
 }
 
+export interface OcrTextBoxPx {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
 export interface ParseResult {
   walls: Wall[];
   doors: Door[];
@@ -97,17 +104,25 @@ interface RawSegment {
 
 const ORIGIN_OFFSET_X = 100;
 const ORIGIN_OFFSET_Y = 100;
-const MAX_PROC_DIM = 680;
+const MAX_PROC_DIM = 750;
 
 /**
- * Computes Otsu's optimal binarization threshold (0..255) on a grayscale array.
+ * Computes optimal binarization threshold (0..255) on a grayscale array.
+ * Avoids thresholding light-gray bathroom floor tiles when solid black/dark-gray walls exist.
  */
 function computeOtsuThreshold(gray: Uint8Array): number {
   const hist = new Int32Array(256);
   const total = gray.length;
+  let veryDarkCount = 0;
   for (let i = 0; i < total; i++) {
-    hist[gray[i]]++;
+    const v = gray[i];
+    hist[v]++;
+    if (v < 70) veryDarkCount++;
   }
+
+  // If the floorplan has clear dark ink (<70 luminance makes up at least 1.5% of pixels),
+  // cap the threshold at 135 so light-gray floor tiles (170..235) are ignored.
+  const hasStrongBlackWalls = veryDarkCount > total * 0.015;
 
   let sum = 0;
   for (let t = 0; t < 256; t++) sum += t * hist[t];
@@ -115,7 +130,7 @@ function computeOtsuThreshold(gray: Uint8Array): number {
   let sumB = 0;
   let wB = 0;
   let maxVariance = 0;
-  let bestThreshold = 160;
+  let bestThreshold = 130;
 
   for (let t = 0; t < 256; t++) {
     wB += hist[t];
@@ -133,7 +148,144 @@ function computeOtsuThreshold(gray: Uint8Array): number {
     }
   }
 
-  return Math.min(Math.max(bestThreshold, 60), 225);
+  const maxAllowed = hasStrongBlackWalls ? 135 : 205;
+  return Math.min(Math.max(bestThreshold, 65), maxAllowed);
+}
+
+/**
+ * Connected-Component Filter (8-connected BFS):
+ * Removes all isolated small islands from the binary mask BEFORE wall detection:
+ * - Individual letters & words ("KITCHEN", "STUDY", "BATH", "9'3\" x 7'10\"", "REF", "DW", "W/D")
+ * - Standalone icons (compass rose, entry arrows, stove burner rings)
+ * - Detached small fixtures
+ */
+function filterConnectedComponents(
+  mask: Uint8Array,
+  w: number,
+  h: number,
+  minSpanPx: number
+): Uint8Array {
+  const out = new Uint8Array(mask);
+  const visited = new Uint8Array(w * h);
+  const queue = new Int32Array(w * h);
+  const componentPixels: number[] = [];
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const startIdx = y * w + x;
+      if (!out[startIdx] || visited[startIdx]) continue;
+
+      visited[startIdx] = 1;
+      let head = 0;
+      let tail = 0;
+      queue[tail++] = startIdx;
+      componentPixels.length = 0;
+
+      let minX = x;
+      let maxX = x;
+      let minY = y;
+      let maxY = y;
+
+      while (head < tail) {
+        const curr = queue[head++];
+        componentPixels.push(curr);
+        const cy = Math.floor(curr / w);
+        const cx = curr - cy * w;
+
+        if (cx < minX) minX = cx;
+        if (cx > maxX) maxX = cx;
+        if (cy < minY) minY = cy;
+        if (cy > maxY) maxY = cy;
+
+        for (let dy = -1; dy <= 1; dy++) {
+          const ny = cy + dy;
+          if (ny < 0 || ny >= h) continue;
+          const nRow = ny * w;
+          for (let dx = -1; dx <= 1; dx++) {
+            if (dx === 0 && dy === 0) continue;
+            const nx = cx + dx;
+            if (nx < 0 || nx >= w) continue;
+            const nIdx = nRow + nx;
+            if (out[nIdx] && !visited[nIdx]) {
+              visited[nIdx] = 1;
+              queue[tail++] = nIdx;
+            }
+          }
+        }
+      }
+
+      const bboxW = maxX - minX + 1;
+      const bboxH = maxY - minY + 1;
+      const maxSpan = Math.max(bboxW, bboxH);
+      const minSpan = Math.max(1, Math.min(bboxW, bboxH));
+      const area = componentPixels.length;
+      const bboxArea = bboxW * bboxH;
+      const fillRatio = area / bboxArea;
+      const aspectRatio = maxSpan / minSpan;
+
+      // 1. Any component smaller than minSpanPx (all letters, digits, stove rings) -> erase
+      // 2. Any compact hollow blob (like a compass rose or standalone toilet/sink/arrow)
+      //    that isn't part of the main room wall network -> erase
+      const isSmallIsland = maxSpan < minSpanPx || area < minSpanPx * 3;
+      const isCompactIconOrText =
+        maxSpan < Math.min(w, h) * 0.16 && aspectRatio < 3.2 && fillRatio < 0.48;
+
+      if (isSmallIsland || isCompactIconOrText) {
+        for (let i = 0; i < componentPixels.length; i++) {
+          out[componentPixels[i]] = 0;
+        }
+      }
+    }
+  }
+
+  return out;
+}
+
+/**
+ * Estimates the dominant thickness (in pixels) of structural walls vs. thin fixture outlines.
+ */
+function estimateStructuralWallThickness(mask: Uint8Array, w: number, h: number): number {
+  const runHist = new Int32Array(32);
+
+  // Sample horizontal and vertical run lengths
+  for (let y = 0; y < h; y += 2) {
+    const row = y * w;
+    let run = 0;
+    for (let x = 0; x < w; x++) {
+      if (mask[row + x]) {
+        run++;
+      } else if (run > 0) {
+        if (run >= 3 && run < 28) runHist[run]++;
+        run = 0;
+      }
+    }
+  }
+
+  for (let x = 0; x < w; x += 2) {
+    let run = 0;
+    for (let y = 0; y < h; y++) {
+      if (mask[y * w + x]) {
+        run++;
+      } else if (run > 0) {
+        if (run >= 3 && run < 28) runHist[run]++;
+        run = 0;
+      }
+    }
+  }
+
+  // Find the peak run thickness in the structural wall range [4..22]
+  // weighting thicker runs slightly so 1-2px fixture lines don't dominate
+  let bestT = 5;
+  let bestScore = 0;
+  for (let t = 4; t <= 20; t++) {
+    const count = (runHist[t - 1] + runHist[t] * 2 + runHist[t + 1]) * Math.sqrt(t);
+    if (count > bestScore) {
+      bestScore = count;
+      bestT = t;
+    }
+  }
+
+  return bestT;
 }
 
 /**
@@ -181,9 +333,9 @@ function closeDoubleLineGaps(
 }
 
 /**
- * Separable box erosion followed by box dilation (morphological opening).
- * Strips away thin lines (text, dimension lines, door swing arcs, furniture icons)
- * while preserving structural walls of thickness >= kernelSize.
+ * Exact kernelSize x kernelSize box erosion followed by box dilation (morphological opening).
+ * Any stroke thinner than kernelSize (such as 1-3px toilet bowls, sinks, bathtubs, kitchen counters,
+ * door swing arcs, or text letters) is completely erased.
  */
 function morphologicalOpen(
   mask: Uint8Array,
@@ -192,15 +344,16 @@ function morphologicalOpen(
   kernelSize: number
 ): Uint8Array {
   if (kernelSize <= 1) return new Uint8Array(mask);
-  const r = Math.floor(kernelSize / 2);
+  const kLeft = Math.floor((kernelSize - 1) / 2);
+  const kRight = kernelSize - 1 - kLeft;
 
-  // Erode horizontally
+  // Erode horizontally by exact kernelSize
   const temp = new Uint8Array(w * h);
   for (let y = 0; y < h; y++) {
     const row = y * w;
-    for (let x = r; x < w - r; x++) {
+    for (let x = kLeft; x < w - kRight; x++) {
       let allOn = 1;
-      for (let dx = -r; dx <= r; dx++) {
+      for (let dx = -kLeft; dx <= kRight; dx++) {
         if (!mask[row + x + dx]) {
           allOn = 0;
           break;
@@ -210,13 +363,13 @@ function morphologicalOpen(
     }
   }
 
-  // Erode vertically
+  // Erode vertically by exact kernelSize
   const eroded = new Uint8Array(w * h);
-  for (let y = r; y < h - r; y++) {
+  for (let y = kLeft; y < h - kRight; y++) {
     const row = y * w;
     for (let x = 0; x < w; x++) {
       let allOn = 1;
-      for (let dy = -r; dy <= r; dy++) {
+      for (let dy = -kLeft; dy <= kRight; dy++) {
         if (!temp[(y + dy) * w + x]) {
           allOn = 0;
           break;
@@ -226,13 +379,13 @@ function morphologicalOpen(
     }
   }
 
-  // Dilate horizontally
+  // Dilate horizontally back by exact kernelSize
   const tempDilate = new Uint8Array(w * h);
   for (let y = 0; y < h; y++) {
     const row = y * w;
-    for (let x = r; x < w - r; x++) {
+    for (let x = kRight; x < w - kLeft; x++) {
       let anyOn = 0;
-      for (let dx = -r; dx <= r; dx++) {
+      for (let dx = -kRight; dx <= kLeft; dx++) {
         if (eroded[row + x + dx]) {
           anyOn = 1;
           break;
@@ -242,13 +395,13 @@ function morphologicalOpen(
     }
   }
 
-  // Dilate vertically
+  // Dilate vertically back by exact kernelSize
   const opened = new Uint8Array(w * h);
-  for (let y = r; y < h - r; y++) {
+  for (let y = kRight; y < h - kLeft; y++) {
     const row = y * w;
     for (let x = 0; x < w; x++) {
       let anyOn = 0;
-      for (let dy = -r; dy <= r; dy++) {
+      for (let dy = -kRight; dy <= kLeft; dy++) {
         if (tempDilate[(y + dy) * w + x]) {
           anyOn = 1;
           break;
@@ -271,7 +424,7 @@ function extractDirectionalWallSegments(
   minLengthPx: number,
   minThicknessPx: number
 ): RawSegment[] {
-  const maxWallThicknessPx = Math.max(26, Math.round(Math.min(w, h) * 0.06));
+  const maxWallThicknessPx = Math.max(28, Math.round(Math.min(w, h) * 0.06));
 
   const vThick = new Uint16Array(w * h);
   for (let x = 0; x < w; x++) {
@@ -331,7 +484,7 @@ function extractDirectionalWallSegments(
         xEnd++;
       }
       const len = xEnd - x;
-      if (len >= minLengthPx && validCount >= len * 0.45) {
+      if (len >= minLengthPx && validCount >= len * 0.5) {
         hRowSegments.push({
           axis: 'h',
           pos: y,
@@ -340,7 +493,7 @@ function extractDirectionalWallSegments(
           thickness: validCount > 0 ? thickSum / validCount : minThicknessPx,
         });
       }
-      x = y === -1 ? 0 : xEnd;
+      x = xEnd;
     }
   }
 
@@ -364,7 +517,7 @@ function extractDirectionalWallSegments(
         yEnd++;
       }
       const len = yEnd - y;
-      if (len >= minLengthPx && validCount >= len * 0.45) {
+      if (len >= minLengthPx && validCount >= len * 0.5) {
         vColSegments.push({
           axis: 'v',
           pos: x,
@@ -378,12 +531,16 @@ function extractDirectionalWallSegments(
   }
 
   return [
-    ...clusterAdjacentSlices(hRowSegments, 'h'),
-    ...clusterAdjacentSlices(vColSegments, 'v'),
+    ...clusterAdjacentSlices(hRowSegments, 'h', minThicknessPx),
+    ...clusterAdjacentSlices(vColSegments, 'v', minThicknessPx),
   ];
 }
 
-function clusterAdjacentSlices(slices: RawSegment[], axis: 'h' | 'v'): RawSegment[] {
+function clusterAdjacentSlices(
+  slices: RawSegment[],
+  axis: 'h' | 'v',
+  minClusterRows: number
+): RawSegment[] {
   const sorted = [...slices].sort((a, b) => a.pos - b.pos || a.start - b.start);
   const clusters: {
     posSum: number;
@@ -400,7 +557,7 @@ function clusterAdjacentSlices(slices: RawSegment[], axis: 'h' | 'v'): RawSegmen
     let matched = false;
     for (let i = clusters.length - 1; i >= 0; i--) {
       const c = clusters[i];
-      if (seg.pos - c.lastPos > 3) continue;
+      if (seg.pos - c.lastPos > 2) continue;
       const overlap = Math.min(c.end, seg.end) - Math.max(c.start, seg.start);
       const minSpan = Math.min(c.end - c.start, segLen);
       if (overlap >= minSpan * 0.4) {
@@ -428,49 +585,124 @@ function clusterAdjacentSlices(slices: RawSegment[], axis: 'h' | 'v'): RawSegmen
     }
   }
 
-  return clusters.map((c) => ({
-    axis,
-    pos: Math.round(c.posSum / Math.max(1, c.weightSum)),
-    start: c.start,
-    end: c.end,
-    thickness: Math.max(2, c.lastPos - c.firstPos + 1),
-  }));
+  return clusters
+    .filter((c) => {
+      const thickness = c.lastPos - c.firstPos + 1;
+      const length = c.end - c.start;
+      // Reject thin 1px artifacts and short boxy non-wall blobs
+      return thickness >= Math.max(2, minClusterRows - 1) && length >= thickness * 1.8;
+    })
+    .map((c) => ({
+      axis,
+      pos: Math.round(c.posSum / Math.max(1, c.weightSum)),
+      start: c.start,
+      end: c.end,
+      thickness: Math.max(2, c.lastPos - c.firstPos + 1),
+    }));
+}
+
+/**
+ * Helper to decode an imperial feet/inches token where OCR may have dropped the apostrophe:
+ * e.g. "9'3\"" -> 9ft 3in; "93\"" -> 9ft 3in; "710\"" -> 7ft 10in; "106\"" -> 10ft 6in; "9'" -> 9ft 0in.
+ */
+function parseImperialTokenToCm(
+  rawDigits1: string,
+  sep1: string | undefined,
+  rawDigits2: string | undefined
+): number | null {
+  if (rawDigits2 !== undefined && rawDigits2 !== '') {
+    // Explicit feet and inches: e.g. 13'8" or 9'3"
+    const ft = parseInt(rawDigits1, 10);
+    const inches = parseInt(rawDigits2, 10);
+    if (ft >= 2 && ft <= 60 && inches >= 0 && inches < 12) {
+      return Math.round((ft * 12 + inches) * 2.54);
+    }
+  }
+
+  const n = parseInt(rawDigits1, 10);
+  if (isNaN(n)) return null;
+
+  // If 1 or 2 digits <= 45 with ' or ": e.g. "9'" or "12'"
+  if (n >= 3 && n <= 45 && (sep1 === "'" || !sep1)) {
+    return Math.round(n * 12 * 2.54);
+  }
+
+  // OCR dropped the apostrophe between feet and inches (e.g. "93\"", "58\"", "87\"", "710\"", "106\"")
+  if (rawDigits1.length === 2 && n >= 30 && n <= 99) {
+    const ft = parseInt(rawDigits1[0], 10);
+    const inches = parseInt(rawDigits1[1], 10);
+    return Math.round((ft * 12 + inches) * 2.54);
+  }
+
+  if (rawDigits1.length === 3) {
+    const lastTwo = parseInt(rawDigits1.slice(1), 10);
+    if (lastTwo === 10 || lastTwo === 11) {
+      // e.g. "710\"" -> 7' 10"
+      const ft = parseInt(rawDigits1[0], 10);
+      return Math.round((ft * 12 + lastTwo) * 2.54);
+    } else {
+      // e.g. "106\"" -> 10' 6"
+      const ft = parseInt(rawDigits1.slice(0, 2), 10);
+      const inches = parseInt(rawDigits1[2], 10);
+      if (ft >= 3 && ft <= 50 && inches <= 9) {
+        return Math.round((ft * 12 + inches) * 2.54);
+      }
+    }
+  }
+
+  if (rawDigits1.length === 4) {
+    const ft = parseInt(rawDigits1.slice(0, 2), 10);
+    const inches = parseInt(rawDigits1.slice(2), 10);
+    if (ft >= 3 && ft <= 50 && inches < 12) {
+      return Math.round((ft * 12 + inches) * 2.54);
+    }
+  }
+
+  return null;
+}
+
+function formatImperialCm(cm: number): string {
+  const totalIn = Math.round(cm / 2.54);
+  const ft = Math.floor(totalIn / 12);
+  const inches = totalIn % 12;
+  return inches > 0 ? `${ft}'${inches}"` : `${ft}'`;
 }
 
 /**
  * Parses architectural dimension strings from OCR text lines/words into centimeters.
  * Supports:
- * - Metric pairs: "5.2m x 3.8m", "5.20 x 3.80 m", "520 x 380 cm", "5200 x 3800 mm", "4.2 x 3.5"
- * - Imperial pairs: "12' 6\" x 14' 2\"", "12'-6\" x 14'-2\"", "12' x 14'", "12.5' x 15'"
- * - Single wall callouts: "5.2m", "420 cm", "14' 6\"", "16.5 ft"
+ * - Metric pairs: "5.2m x 3.8m", "5.20 x 3.80 m", "520 x 380 cm"
+ * - Imperial pairs (even when OCR drops the ' apostrophe): "9'3\" x 7'10\"", "93\" x 710\"", "10'6\" x 9'"
+ * - Single wall callouts: "5.2m", "420 cm", "14' 6\""
  */
 export function parseDimensionText(
   text: string
 ): { kind: 'pair' | 'single'; unit: Unit; val1Cm: number; val2Cm?: number; matchedText: string } | null {
   const cleaned = text
     .replace(/[×✕＊*]/g, 'x')
-    .replace(/[""״]/g, '"')
-    .replace(/[''′´`]/g, "'")
+    .replace(/[""״”‟]/g, '"')
+    .replace(/[''′´`’‘]/g, "'")
+    .replace(/''/g, '"')
     .trim();
 
-  // 1. Imperial feet/inches pair: e.g. 12' 6" x 14' 0" or 12' x 15' or 12'-6" x 14'-2"
-  const impPairRegex =
-    /(\d{1,2})\s*'\s*(?:-\s*)?(?:(\d{1,2})\s*"?)?\s*[xX]\s*(\d{1,2})\s*'\s*(?:-\s*)?(?:(\d{1,2})\s*"?)?/;
-  const impPairMatch = cleaned.match(impPairRegex);
-  if (impPairMatch) {
-    const ft1 = parseInt(impPairMatch[1], 10);
-    const in1 = impPairMatch[2] ? parseInt(impPairMatch[2], 10) : 0;
-    const ft2 = parseInt(impPairMatch[3], 10);
-    const in2 = impPairMatch[4] ? parseInt(impPairMatch[4], 10) : 0;
-    const cm1 = Math.round((ft1 * 12 + in1) * 2.54);
-    const cm2 = Math.round((ft2 * 12 + in2) * 2.54);
-    if (cm1 >= 90 && cm1 <= 2500 && cm2 >= 90 && cm2 <= 2500) {
+  // 1. Imperial feet/inches pair (handles both "13'8\" x 10'5\"" and OCR-dropped-apostrophe "93\" x 710\"" or "106\" x 9'")
+  const impFlexRegex =
+    /(\d{1,4})\s*(['"])?\s*(?:-\s*)?(?:(\d{1,2})\s*"?)?\s*[xX]\s*(\d{1,4})\s*(['"])?\s*(?:-\s*)?(?:(\d{1,2})\s*"?)?/;
+  const impFlexMatch = cleaned.match(impFlexRegex);
+  if (
+    impFlexMatch &&
+    (cleaned.includes("'") || cleaned.includes('"')) &&
+    !/\b(mm|cm|m)\b/i.test(cleaned)
+  ) {
+    const cm1 = parseImperialTokenToCm(impFlexMatch[1], impFlexMatch[2], impFlexMatch[3]);
+    const cm2 = parseImperialTokenToCm(impFlexMatch[4], impFlexMatch[5], impFlexMatch[6]);
+    if (cm1 && cm2 && cm1 >= 80 && cm1 <= 2500 && cm2 >= 80 && cm2 <= 2500) {
       return {
         kind: 'pair',
         unit: 'ft',
         val1Cm: cm1,
         val2Cm: cm2,
-        matchedText: impPairMatch[0].trim(),
+        matchedText: `${formatImperialCm(cm1)} x ${formatImperialCm(cm2)}`,
       };
     }
   }
@@ -504,11 +736,6 @@ export function parseDimensionText(
       cm1 = raw1 * 100;
       cm2 = raw2 * 100;
     } else {
-      // Unitless pair heuristics:
-      // - Decimals between 1.2 and 18.0 -> meters (e.g. "4.20 x 3.60")
-      // - Integers between 120 and 1500 -> centimeters (e.g. "420 x 360")
-      // - Integers between 1200 and 15000 -> millimeters (e.g. "4200 x 3600")
-      // - Integers between 7 and 35 -> feet (e.g. "12 x 14")
       if (
         (metricPairMatch[1].includes('.') || metricPairMatch[3].includes('.')) &&
         raw1 >= 1.2 &&
@@ -542,7 +769,7 @@ export function parseDimensionText(
     }
   }
 
-  // 3. Single Imperial dimension callout: e.g. "14' 6\"" or "14'-6\""
+  // 3. Single Imperial dimension callout: e.g. "14' 6\""
   const impSingleRegex = /\b(\d{1,2})\s*'\s*(?:-\s*)?(\d{1,2})\s*"/;
   const impSingleMatch = cleaned.match(impSingleRegex);
   if (impSingleMatch) {
@@ -624,13 +851,12 @@ function matchDimensionsToPixelWalls(
     const { cxPx, cyPx } = cand;
 
     if (cand.kind === 'pair' && cand.val2Cm) {
-      // Cast rays left, right, up, down from (cxPx, cyPx) to find enclosing room walls
       let leftWall: RawSegment | null = null;
       let rightWall: RawSegment | null = null;
       let topWall: RawSegment | null = null;
       let bottomWall: RawSegment | null = null;
 
-      const marginPx = 25;
+      const marginPx = 35;
 
       for (const vw of vWalls) {
         if (cyPx >= vw.start - marginPx && cyPx <= vw.end + marginPx) {
@@ -658,7 +884,6 @@ function matchDimensionsToPixelWalls(
       const roomH = topWall && bottomWall ? bottomWall.pos - topWall.pos : 0;
 
       if (roomW > 30 && roomH > 30) {
-        // Check direct (val1 -> W, val2 -> H) vs transposed (val2 -> W, val1 -> H)
         const directRatioX = cand.val1Cm / roomW;
         const directRatioY = cand.val2Cm / roomH;
         const directDiff = Math.abs(directRatioX - directRatioY) / Math.max(directRatioX, directRatioY);
@@ -708,7 +933,6 @@ function matchDimensionsToPixelWalls(
         }
       }
     } else if (cand.kind === 'single') {
-      // Find nearest wall segment whose span covers the label
       let bestWall: RawSegment | null = null;
       let bestDist = 80;
 
@@ -799,15 +1023,16 @@ export function parseRoomNameText(text: string): string | null {
   const roomPatterns: [RegExp, string][] = [
     [/\b(primary|master|main)\s+bed(room)?\b/i, 'Primary Bedroom'],
     [/\bbed(room)?\s*\d*\b/i, 'Bedroom'],
-    [/\bliving\s*(&|and|\/)?\s*dining\b/i, 'Living & Dining'],
-    [/\bliving(\s+room|\s+area)?\b/i, 'Living Room'],
-    [/\bdining(\s+room|\s+area)?\b/i, 'Dining Room'],
+    [/\bliving\s*(&|and|\/)?\s*dining\b/i, 'Living / Dining'],
+    [/\bdining\s+room\b/i, 'Dining Room'],
+    [/\bliving(\s+room|\s+area|\/)?\b/i, 'Living Room'],
+    [/\bdining(\s+area)?\b/i, 'Dining'],
     [/\bkitchen(ette)?\b/i, 'Kitchen'],
-    [/\bbath(room)?\s*\d*\b/i, 'Bathroom'],
-    [/\b(restroom|powder\s*room|wc)\b/i, 'Bathroom'],
-    [/\b(home\s+)?(office|study|den)\b/i, 'Office'],
+    [/\bbath(room)?\s*\d*\b/i, 'Bath'],
+    [/\b(restroom|powder\s*room|wc)\b/i, 'Bath'],
+    [/\b(home\s+)?(office|study|den)\b/i, 'Study'],
     [/\b(walk[- ]?in\s+)?closet\b/i, 'Closet'],
-    [/\b(foyer|entry(way)?|vestibule)\b/i, 'Entry / Foyer'],
+    [/\b(foyer|entry(way)?|vestibule)\b/i, 'Foyer'],
     [/\b(balcony|terrace|patio|deck)\b/i, 'Balcony'],
     [/\b(laundry|utility)\b/i, 'Laundry'],
     [/\b(hall(way)?|corridor)\b/i, 'Hallway'],
@@ -824,13 +1049,19 @@ export function parseRoomNameText(text: string): string | null {
 }
 
 /**
- * Runs client-side Tesseract OCR on the floorplan image and extracts both
- * printed dimension strings ("5.2m x 3.4m") and room name labels ("Bedroom", "Kitchen", "Bathroom").
+ * Runs client-side Tesseract OCR on the floorplan image and extracts:
+ * 1. Printed dimension strings ("9'3\" x 7'10\"", "5.2m x 3.4m")
+ * 2. Room name labels ("Study", "Kitchen", "Bath", "Living / Dining")
+ * 3. All text bounding boxes (so text regions can be masked out from wall detection)
  */
 export async function extractOcrDimensionsFromImage(
   img: HTMLImageElement,
   invert = false
-): Promise<{ dimensions: RawDimensionCandidate[]; roomNames: RawRoomNameCandidate[] }> {
+): Promise<{
+  dimensions: RawDimensionCandidate[];
+  roomNames: RawRoomNameCandidate[];
+  textBoxes: OcrTextBoxPx[];
+}> {
   const naturalW = img.naturalWidth || img.width || 600;
   const naturalH = img.naturalHeight || img.height || 450;
 
@@ -868,14 +1099,24 @@ export async function extractOcrDimensionsFromImage(
     const result = await worker.recognize(canvas, {}, { blocks: true });
     const dimensions: RawDimensionCandidate[] = [];
     const roomNames: RawRoomNameCandidate[] = [];
+    const textBoxes: OcrTextBoxPx[] = [];
 
     const blocks = result.data?.blocks || [];
     for (const block of blocks) {
       for (const para of block.paragraphs || []) {
         for (const line of para.lines || []) {
           if (!line.bbox) continue;
-          const cxPx = (((line.bbox.x0 + line.bbox.x1) / 2) / ocrW) * procW;
-          const cyPx = (((line.bbox.y0 + line.bbox.y1) / 2) / ocrH) * procH;
+          const x0Px = Math.floor((line.bbox.x0 / ocrW) * procW);
+          const y0Px = Math.floor((line.bbox.y0 / ocrH) * procH);
+          const x1Px = Math.ceil((line.bbox.x1 / ocrW) * procW);
+          const y1Px = Math.ceil((line.bbox.y1 / ocrH) * procH);
+          const cxPx = (x0Px + x1Px) / 2;
+          const cyPx = (y0Px + y1Px) / 2;
+
+          // Record text box if it contains alphanumeric letters/digits (not vertical wall pipes "|")
+          if (/[a-zA-Z0-9]{2,}/.test(line.text) && y1Px - y0Px < procH * 0.12) {
+            textBoxes.push({ x0: x0Px, y0: y0Px, x1: x1Px, y1: y1Px });
+          }
 
           const parsedDim = parseDimensionText(line.text);
           if (parsedDim) {
@@ -892,17 +1133,30 @@ export async function extractOcrDimensionsFromImage(
 
           const parsedRoom = parseRoomNameText(line.text);
           if (parsedRoom) {
-            roomNames.push({
-              name: parsedRoom,
-              cxPx,
-              cyPx,
-            });
+            // Merge adjacent stacked lines like "LIVING/" + "DINING ROOM"
+            const prev = roomNames[roomNames.length - 1];
+            if (
+              prev &&
+              Math.abs(prev.cxPx - cxPx) < 40 &&
+              Math.abs(cyPx - prev.cyPx) < 30 &&
+              prev.name === 'Living Room' &&
+              parsedRoom === 'Dining Room'
+            ) {
+              prev.name = 'Living / Dining Room';
+              prev.cyPx = (prev.cyPx + cyPx) / 2;
+            } else {
+              roomNames.push({
+                name: parsedRoom,
+                cxPx,
+                cyPx,
+              });
+            }
           }
         }
       }
     }
 
-    return { dimensions, roomNames };
+    return { dimensions, roomNames, textBoxes };
   } finally {
     await worker.terminate();
   }
@@ -911,8 +1165,8 @@ export async function extractOcrDimensionsFromImage(
 /**
  * Topological Graph Regularizer:
  * 1. Groups collinear wall segments along the same axis line.
- * 2. Detects doorway/window openings (55cm - 175cm gaps between collinear segments) and bridges the wall
- *    so doors/windows sit cleanly on top of continuous walls (matching FloorGAN's native model).
+ * 2. Detects doorway/window openings (55cm - 185cm gaps between collinear segments, or up to 500cm exterior window walls)
+ *    and bridges the wall so doors/windows sit cleanly on top of continuous walls.
  * 3. Snaps perpendicular L, T, and + corner junctions so rooms form closed orthogonal polygons.
  */
 export function regularizeFloorplanGraph(
@@ -926,7 +1180,8 @@ export function regularizeFloorplanGraph(
 ): { walls: Wall[]; doors: Door[]; windows: WindowItem[] } {
   const collinearToleranceCm = 24;
   const smallGapBridgeCm = 35;
-  const maxOpeningWidthCm = 175;
+  const maxDoorWidthCm = 175;
+  const maxExteriorWindowCm = 520;
   const minOpeningWidthCm = 55;
   const cornerSnapToleranceCm = 36;
 
@@ -1004,54 +1259,65 @@ export function regularizeFloorplanGraph(
     const bridged: { start: number; end: number }[] = [merged[0]];
     const isExteriorLine =
       axis === 'h'
-        ? Math.abs(alignedPos - minY) < 40 || Math.abs(alignedPos - maxY) < 40
-        : Math.abs(alignedPos - minX) < 40 || Math.abs(alignedPos - maxX) < 40;
+        ? Math.abs(alignedPos - minY) < 45 || Math.abs(alignedPos - maxY) < 45
+        : Math.abs(alignedPos - minX) < 45 || Math.abs(alignedPos - maxX) < 45;
 
     for (let i = 1; i < merged.length; i++) {
       const prev = bridged[bridged.length - 1];
       const curr = merged[i];
       const gapWidth = curr.start - prev.end;
 
-      if (gapWidth >= minOpeningWidthCm && gapWidth <= maxOpeningWidthCm) {
-        const gapCenter = Math.round((prev.end + curr.start) / 2);
-        const clampedWidth = Math.round(Math.min(160, Math.max(70, gapWidth)) / 5) * 5;
-
-        let rawDensity = 0;
-        if (rawBinaryMask && cmPerPx > 0) {
-          const pxPos = Math.round(alignedPos / cmPerPx);
-          const pxStart = Math.round(prev.end / cmPerPx);
-          const pxEnd = Math.round(curr.start / cmPerPx);
-          let onCount = 0;
-          let sampleCount = 0;
-          for (let t = pxStart; t <= pxEnd; t++) {
-            for (let d = -3; d <= 3; d++) {
-              const rx = axis === 'h' ? t : pxPos + d;
-              const ry = axis === 'h' ? pxPos + d : t;
-              if (rx >= 0 && rx < maskWidth && ry >= 0 && ry < maskHeight) {
-                sampleCount++;
-                if (rawBinaryMask[ry * maskWidth + rx]) onCount++;
-              }
+      // Measure raw thin-line density inside the gap (e.g. window glass panes)
+      let rawDensity = 0;
+      if (rawBinaryMask && cmPerPx > 0) {
+        const pxPos = Math.round(alignedPos / cmPerPx);
+        const pxStart = Math.round(prev.end / cmPerPx);
+        const pxEnd = Math.round(curr.start / cmPerPx);
+        let onCount = 0;
+        let sampleCount = 0;
+        for (let t = pxStart; t <= pxEnd; t++) {
+          for (let d = -4; d <= 4; d++) {
+            const rx = axis === 'h' ? t : pxPos + d;
+            const ry = axis === 'h' ? pxPos + d : t;
+            if (rx >= 0 && rx < maskWidth && ry >= 0 && ry < maskHeight) {
+              sampleCount++;
+              if (rawBinaryMask[ry * maskWidth + rx]) onCount++;
             }
           }
-          if (sampleCount > 0) rawDensity = onCount / sampleCount;
         }
+        if (sampleCount > 0) rawDensity = onCount / sampleCount;
+      }
 
-        const isWindow = isExteriorLine && (rawDensity > 0.14 || gapWidth >= 110);
+      const isExteriorWindowSpan =
+        isExteriorLine &&
+        gapWidth >= minOpeningWidthCm &&
+        gapWidth <= maxExteriorWindowCm &&
+        rawDensity >= 0.12;
+
+      const isStandardOpening =
+        gapWidth >= minOpeningWidthCm && gapWidth <= maxDoorWidthCm;
+
+      if (isExteriorWindowSpan || isStandardOpening) {
+        const gapCenter = Math.round((prev.end + curr.start) / 2);
+        const isWindow = isExteriorWindowSpan || (isExteriorLine && gapWidth >= 115);
+
         if (isWindow) {
+          const winWidth = Math.round(Math.min(360, Math.max(80, gapWidth)) / 5) * 5;
           windows.push({
             id: `win_imp_${windows.length + 1}_${Date.now().toString(36)}`,
             x: axis === 'h' ? gapCenter + ORIGIN_OFFSET_X : alignedPos + ORIGIN_OFFSET_X,
             y: axis === 'h' ? alignedPos + ORIGIN_OFFSET_Y : gapCenter + ORIGIN_OFFSET_Y,
-            width: clampedWidth,
+            width: winWidth,
             thickness: avgThickness,
             rotation: axis === 'h' ? 0 : 90,
           });
         } else {
+          const doorWidth = Math.round(Math.min(95, Math.max(75, gapWidth)) / 5) * 5;
           doors.push({
             id: `door_imp_${doors.length + 1}_${Date.now().toString(36)}`,
             x: axis === 'h' ? gapCenter + ORIGIN_OFFSET_X : alignedPos + ORIGIN_OFFSET_X,
             y: axis === 'h' ? alignedPos + ORIGIN_OFFSET_Y : gapCenter + ORIGIN_OFFSET_Y,
-            width: Math.min(95, Math.max(75, clampedWidth)),
+            width: doorWidth,
             rotation: axis === 'h' ? 0 : 90,
             swingDirection: 'left',
           });
@@ -1155,16 +1421,21 @@ export function regularizeFloorplanGraph(
 }
 
 /**
- * Deterministic Raster-to-Vector Floorplan Parser.
- * Takes an HTMLImageElement, ParseOptions, and optional OCR dimension candidates.
- * If OCR dimensions are present and match enclosing room/wall spans, automatically calibrates scale!
+ * Deterministic Raster-to-Vector Floorplan Parser:
+ * 1. Thresholds image into raw binary mask.
+ * 2. Connected-Component Analysis (CCA) strips all isolated letters, numbers, stove rings, and icons.
+ * 3. Masks out OCR-detected text bounding boxes.
+ * 4. Estimates dominant structural wall thickness and runs exact kernelSize x kernelSize morphological opening
+ *    to strip thin 1-3px fixture outlines (toilets, sinks, bathtubs, counters, door swing arcs).
+ * 5. Calibrates real-world scale from OCR dimensions via 4-way ray-casting.
  */
 export function parseFloorplanImage(
   img: HTMLImageElement,
   options: ParseOptions,
   ocrCandidates: RawDimensionCandidate[] = [],
   useOcrScale = true,
-  roomCandidates: RawRoomNameCandidate[] = []
+  roomCandidates: RawRoomNameCandidate[] = [],
+  ocrTextBoxes: OcrTextBoxPx[] = []
 ): ParseResult {
   const naturalW = img.naturalWidth || img.width || 600;
   const naturalH = img.naturalHeight || img.height || 450;
@@ -1206,15 +1477,51 @@ export function parseFloorplanImage(
     rawMask[i] = gray[i] < computedThreshold ? 1 : 0;
   }
 
-  const closedMask = options.closeHollowWalls
-    ? closeDoubleLineGaps(rawMask, w, h, Math.max(4, options.minWallThicknessPx * 2))
-    : rawMask;
-
-  const structuralMask = morphologicalOpen(
-    closedMask,
+  // Step 1: Connected-Component Filter — immediately strips isolated text characters ("KITCHEN", "STUDY"),
+  // numbers ("9'3\" x 7'10\""), stove burner rings, compass rose, and standalone icons.
+  const ccCleanedMask = filterConnectedComponents(
+    rawMask,
     w,
     h,
-    options.minWallThicknessPx
+    Math.max(24, Math.round(Math.max(w, h) * 0.04))
+  );
+
+  // Step 2: Erase any remaining pixels inside OCR-detected text bounding boxes
+  for (const box of ocrTextBoxes) {
+    const x0 = Math.max(0, box.x0 - 1);
+    const y0 = Math.max(0, box.y0 - 1);
+    const x1 = Math.min(w - 1, box.x1 + 1);
+    const y1 = Math.min(h - 1, box.y1 + 1);
+    for (let y = y0; y <= y1; y++) {
+      const row = y * w;
+      for (let x = x0; x <= x1; x++) {
+        ccCleanedMask[row + x] = 0;
+      }
+    }
+  }
+
+  // Step 3: Optional double-line closing (ONLY when explicitly enabled for hollow CAD walls)
+  const closedMask = options.closeHollowWalls
+    ? closeDoubleLineGaps(ccCleanedMask, w, h, Math.max(3, options.minWallThicknessPx))
+    : ccCleanedMask;
+
+  // Step 4: Auto-adapt erosion kernel to structural wall thickness so thin 1-3px fixture lines
+  // (toilets, sinks, bathtubs, counters, door arcs) attached to walls are completely stripped
+  const dominantWallThickPx = estimateStructuralWallThickness(closedMask, w, h);
+  const autoKernelPx = Math.max(
+    options.minWallThicknessPx,
+    Math.min(8, Math.round(dominantWallThickPx * 0.6))
+  );
+
+  const openedMask = morphologicalOpen(closedMask, w, h, autoKernelPx);
+
+  // Step 5: Second connected-component pass after opening to remove any small fixture stubs
+  // that became detached when their thin outline strokes were eroded away
+  const structuralMask = filterConnectedComponents(
+    openedMask,
+    w,
+    h,
+    Math.max(20, Math.round(Math.max(w, h) * 0.035))
   );
 
   let minPxX = w;
@@ -1248,8 +1555,8 @@ export function parseFloorplanImage(
     structuralMask,
     w,
     h,
-    14,
-    Math.max(1, options.minWallThicknessPx - 1)
+    16,
+    Math.max(2, autoKernelPx - 1)
   );
 
   const ocrMatch = matchDimensionsToPixelWalls(
@@ -1269,14 +1576,14 @@ export function parseFloorplanImage(
       ? ocrMatch.cmPerPx
       : targetWidthCm / spanPxW;
 
-  const minLengthPx = Math.max(12, Math.round(options.minWallLengthCm / cmPerPx));
+  const minLengthPx = Math.max(14, Math.round(options.minWallLengthCm / cmPerPx));
 
   const rawSegmentsPx = extractDirectionalWallSegments(
     structuralMask,
     w,
     h,
     minLengthPx,
-    Math.max(1, options.minWallThicknessPx - 1)
+    Math.max(2, autoKernelPx - 1)
   );
 
   const segmentsCm: RawSegment[] = rawSegmentsPx.map((s) => ({
@@ -1297,14 +1604,12 @@ export function parseFloorplanImage(
     options.detectOpenings
   );
 
-  // Update detected dimension world coordinates with final cmPerPx
   const detectedDimensions: DetectedDimension[] = ocrMatch.matched.map((d, idx) => ({
     ...d,
     xCm: Math.round(ocrCandidates[idx].cxPx * cmPerPx + ORIGIN_OFFSET_X),
     yCm: Math.round(ocrCandidates[idx].cyPx * cmPerPx + ORIGIN_OFFSET_Y),
   }));
 
-  // Pair detected room names (e.g., "Living Room", "Bedroom", "Kitchen") with their nearest dimension label
   const roomLabels: RoomLabel[] = roomCandidates.map((rm, idx) => {
     let bestDimText: string | undefined;
     let bestDistPx = 90;
@@ -1324,7 +1629,7 @@ export function parseFloorplanImage(
     };
   });
 
-  // Visual morphological mask preview
+  // Visual morphological mask preview (navy = kept structural walls, light gray = stripped text/toilets/sinks)
   const previewCanvas = document.createElement('canvas');
   previewCanvas.width = w;
   previewCanvas.height = h;

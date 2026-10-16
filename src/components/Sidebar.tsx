@@ -1,26 +1,25 @@
-import React, { useState } from 'react';
-import {
-  Armchair,
-  Bed,
-  Table,
-  Briefcase,
-  Search,
-  Plus,
-} from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Armchair, Bed, Shapes, Search, Plus, Pencil, Trash2, Type } from 'lucide-react';
 import { FURNITURE_CATALOG } from '../catalog';
 import {
   FurnitureCatalogItem,
   FurnitureCategory,
   PlacedFurniture,
   FloorplanState,
+  TextBoxItem,
 } from '../types';
 import { formatDimension } from '../utils/geometry';
+import { TableIcon } from './icons/TableIcon';
+import { ShapeThumbnail } from './ShapeBody';
+import { CustomObjectCreator } from './CustomObjectCreator';
+
+const CUSTOM_CATALOG_KEY = 'floorgan_custom_catalog_v1';
 
 interface Props {
   state: FloorplanState;
   setState: React.Dispatch<React.SetStateAction<FloorplanState>>;
   setSelectedId: (id: string | null) => void;
-  setSelectedType: (type: 'furniture') => void;
+  setSelectedType: (type: any) => void;
 }
 
 export const Sidebar: React.FC<Props> = ({
@@ -32,17 +31,41 @@ export const Sidebar: React.FC<Props> = ({
   const [selectedCategory, setSelectedCategory] = useState<FurnitureCategory | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Custom objects persist for the browser session (sessionStorage)
+  const [customItems, setCustomItems] = useState<FurnitureCatalogItem[]>(() => {
+    try {
+      const saved = sessionStorage.getItem(CUSTOM_CATALOG_KEY);
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
+  const [creatorOpen, setCreatorOpen] = useState(false);
+  const [editingItem, setEditingItem] = useState<FurnitureCatalogItem | null>(null);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(CUSTOM_CATALOG_KEY, JSON.stringify(customItems));
+    } catch (e) {
+      console.warn('Could not save custom catalog to sessionStorage', e);
+    }
+  }, [customItems]);
+
   const categories = [
     { id: 'all', label: 'All Items', icon: null },
     { id: 'beds', label: 'Beds', icon: <Bed size={15} /> },
-    { id: 'tables', label: 'Tables', icon: <Table size={15} /> },
+    { id: 'tables', label: 'Tables', icon: <TableIcon size={15} /> },
     { id: 'seating', label: 'Chairs & Sofas', icon: <Armchair size={15} /> },
-    { id: 'desks', label: 'Desks', icon: <Briefcase size={15} /> },
+    { id: 'custom', label: 'Custom', icon: <Shapes size={15} /> },
   ];
 
-  const filteredItems = FURNITURE_CATALOG.filter((item) => {
+  const allItems = [...FURNITURE_CATALOG, ...customItems];
+  const query = searchQuery.trim().toLowerCase();
+  const filteredItems = allItems.filter((item) => {
     const matchesCategory = selectedCategory === 'all' || item.category === selectedCategory;
-    const matchesSearch = item.name.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesSearch =
+      !query || item.name.toLowerCase().includes(query) || item.category.includes(query);
     return matchesCategory && matchesSearch;
   });
 
@@ -60,6 +83,8 @@ export const Sidebar: React.FC<Props> = ({
       rotation: 0,
       color: catalogItem.color,
       iconType: catalogItem.iconType,
+      ...(catalogItem.shape ? { shape: catalogItem.shape } : {}),
+      ...(catalogItem.points ? { points: catalogItem.points.map((p) => ({ ...p })) } : {}),
     };
 
     setState((prev) => ({
@@ -69,6 +94,57 @@ export const Sidebar: React.FC<Props> = ({
 
     setSelectedId(newPlacedItem.id);
     setSelectedType('furniture');
+  };
+
+  const openCreator = (item: FurnitureCatalogItem | null = null) => {
+    setEditingItem(item);
+    setCreatorOpen(true);
+  };
+
+  const handleSaveCustom = (item: FurnitureCatalogItem, placeNow: boolean) => {
+    setCustomItems((prev) =>
+      prev.some((i) => i.catalogId === item.catalogId)
+        ? prev.map((i) => (i.catalogId === item.catalogId ? item : i))
+        : [...prev, item]
+    );
+    setCreatorOpen(false);
+    setEditingItem(null);
+    setSelectedCategory('custom');
+    setSearchQuery('');
+    if (placeNow) handleAddFurniture(item);
+  };
+
+  const handleDeleteCustom = (catalogId: string) => {
+    setCustomItems((prev) => prev.filter((i) => i.catalogId !== catalogId));
+  };
+
+  const handleAddTextBox = () => {
+    const newTextBox: TextBoxItem = {
+      id: 'text_' + Date.now(),
+      text: 'Custom Text',
+      x: 400 + ((state.textBoxes || []).length % 5) * 20,
+      y: 350 + ((state.textBoxes || []).length % 5) * 20,
+      width: 130,
+      height: 50,
+      fontSize: 16,
+      color: '#1e293b',
+      backgroundColor: '#ffffff',
+      borderColor: '#cbd5e1',
+      borderStyle: 'solid',
+      borderRadius: 6,
+      rotation: 0,
+      textAlign: 'center',
+      bold: false,
+      italic: false,
+    };
+
+    setState((prev) => ({
+      ...prev,
+      textBoxes: [...(prev.textBoxes || []), newTextBox],
+    }));
+
+    setSelectedId(newTextBox.id);
+    setSelectedType('textbox');
   };
 
   return (
@@ -100,42 +176,156 @@ export const Sidebar: React.FC<Props> = ({
           >
             {cat.icon}
             <span>{cat.label}</span>
+            {cat.id === 'custom' && customItems.length > 0 && (
+              <span className="chip-count">{customItems.length}</span>
+            )}
           </button>
         ))}
       </div>
 
       {/* Item List */}
       <div className="catalog-grid">
-        {filteredItems.map((item) => (
+        <div className="custom-actions-bar">
+          <button className="create-custom-btn flex-1" onClick={() => openCreator()} title="Create custom object shape">
+            <Plus size={14} />
+            <span>Custom Shape</span>
+          </button>
+          <button className="create-custom-btn flex-1" onClick={handleAddTextBox} title="Add custom text box / annotation">
+            <Type size={14} />
+            <span>Text Box</span>
+          </button>
+        </div>
+
+        {((selectedCategory === 'custom' || selectedCategory === 'all') &&
+          (!query || 'custom text box annotation note label'.includes(query))) && (
           <div
-            key={item.catalogId}
             className="catalog-card"
-            onClick={() => handleAddFurniture(item)}
-            title={`Click to place ${item.name}`}
+            onClick={handleAddTextBox}
+            title="Click to place a customizable text box"
           >
-            <div className="catalog-card-preview" style={{ backgroundColor: item.color + '22' }}>
+            <div className="catalog-card-preview" style={{ backgroundColor: '#eff6ff' }}>
               <div
-                className="furniture-preview-box"
                 style={{
-                  width: Math.min(Math.max((item.width / 220) * 54, 24), 60),
-                  height: Math.min(Math.max((item.depth / 220) * 54, 18), 50),
-                  backgroundColor: item.color,
-                  borderRadius: item.iconType === 'table_round' ? '50%' : 0,
+                  width: 40,
+                  height: 28,
+                  backgroundColor: '#ffffff',
+                  border: '1.5px dashed #3b82f6',
+                  borderRadius: 4,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#2563eb',
+                  fontWeight: 700,
+                  fontSize: 13,
+                  fontFamily: 'sans-serif',
                 }}
-              />
+              >
+                Tt
+              </div>
             </div>
             <div className="catalog-card-info">
-              <span className="item-name">{item.name}</span>
+              <span className="item-name">
+                Text Box
+                <span className="custom-tag">Custom</span>
+              </span>
               <span className="item-dims">
-                {formatDimension(item.width, state.unit)} × {formatDimension(item.depth, state.unit)}
+                Custom text, font &amp; colors
               </span>
             </div>
             <button className="add-btn" title="Add to floorplan">
               <Plus size={14} />
             </button>
           </div>
-        ))}
+        )}
+
+        {selectedCategory === 'custom' && customItems.length === 0 && (
+          <div className="catalog-empty">
+            Create custom shapes or place text boxes to annotate your floorplan.
+          </div>
+        )}
+
+        {filteredItems.map((item) => {
+          const isCustom = item.category === 'custom';
+          return (
+            <div
+              key={item.catalogId}
+              className="catalog-card"
+              onClick={() => handleAddFurniture(item)}
+              title={item.description || `Click to place ${item.name}`}
+            >
+              <div className="catalog-card-preview" style={{ backgroundColor: item.color + '22' }}>
+                {item.shape ? (
+                  <ShapeThumbnail
+                    shape={item.shape}
+                    points={item.points}
+                    width={item.width}
+                    depth={item.depth}
+                    color={item.color}
+                    size={40}
+                  />
+                ) : (
+                  <div
+                    className="furniture-preview-box"
+                    style={{
+                      width: Math.min(Math.max((item.width / 220) * 54, 24), 60),
+                      height: Math.min(Math.max((item.depth / 220) * 54, 18), 50),
+                      backgroundColor: item.color,
+                      borderRadius: item.iconType === 'table_round' ? '50%' : 0,
+                    }}
+                  />
+                )}
+              </div>
+              <div className="catalog-card-info">
+                <span className="item-name">
+                  {item.name}
+                  {isCustom && <span className="custom-tag">Custom</span>}
+                </span>
+                <span className="item-dims">
+                  {formatDimension(item.width, state.unit)} × {formatDimension(item.depth, state.unit)}
+                </span>
+              </div>
+              {isCustom && (
+                <div className="catalog-card-actions">
+                  <button
+                    className="card-action-btn"
+                    title="Edit custom object"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openCreator(item);
+                    }}
+                  >
+                    <Pencil size={12} />
+                  </button>
+                  <button
+                    className="card-action-btn danger"
+                    title="Remove from catalog"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeleteCustom(item.catalogId);
+                    }}
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              )}
+              <button className="add-btn" title="Add to floorplan">
+                <Plus size={14} />
+              </button>
+            </div>
+          );
+        })}
       </div>
+
+      <CustomObjectCreator
+        isOpen={creatorOpen}
+        unit={state.unit}
+        editingItem={editingItem}
+        onClose={() => {
+          setCreatorOpen(false);
+          setEditingItem(null);
+        }}
+        onSave={handleSaveCustom}
+      />
     </aside>
   );
 };

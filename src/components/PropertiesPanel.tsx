@@ -9,16 +9,23 @@ import {
   Eye,
   EyeOff,
   Ruler,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  Bold,
+  Italic,
+  Type,
 } from 'lucide-react';
-import { FloorplanState, PlacedFurniture, ToolMode } from '../types';
+import { CustomShapeKind, FloorplanState, PlacedFurniture, TextBoxItem, ToolMode } from '../types';
 import { formatDimension, distance } from '../utils/geometry';
+import { BASIC_SHAPES } from '../utils/shapes';
 
 interface Props {
   state: FloorplanState;
   setState: React.Dispatch<React.SetStateAction<FloorplanState>>;
   selectedId: string | null;
   setSelectedId: (id: string | null) => void;
-  selectedType: 'furniture' | 'wall' | 'door' | 'window' | 'measurement' | null;
+  selectedType: 'furniture' | 'wall' | 'door' | 'window' | 'measurement' | 'textbox' | null;
   setSelectedType: (type: any) => void;
   setTool?: (tool: ToolMode) => void;
 }
@@ -37,6 +44,7 @@ export const PropertiesPanel: React.FC<Props> = ({
   const selectedDoor = state.doors.find((d) => d.id === selectedId);
   const selectedWindow = state.windows.find((w) => w.id === selectedId);
   const selectedMeasurement = state.measurements.find((m) => m.id === selectedId);
+  const selectedTextBox = (state.textBoxes || []).find((t) => t.id === selectedId);
 
   const colors = [
     '#334155', // Slate
@@ -59,10 +67,21 @@ export const PropertiesPanel: React.FC<Props> = ({
     }));
   };
 
+  // Text box handlers
+  const updateTextBox = (updates: Partial<TextBoxItem>) => {
+    if (!selectedId) return;
+    setState((prev) => ({
+      ...prev,
+      textBoxes: (prev.textBoxes || []).map((t) => (t.id === selectedId ? { ...t, ...updates } : t)),
+    }));
+  };
+
   const handleRotate = (deltaDegrees: number) => {
     if (selectedFurniture) {
       const nextRotation = (selectedFurniture.rotation + deltaDegrees + 360) % 360;
       updateFurniture({ rotation: nextRotation });
+    } else if (selectedTextBox) {
+      updateTextBox({ rotation: (selectedTextBox.rotation + deltaDegrees + 360) % 360 });
     } else if (selectedDoor) {
       setState((prev) => ({
         ...prev,
@@ -90,6 +109,15 @@ export const PropertiesPanel: React.FC<Props> = ({
       };
       setState((prev) => ({ ...prev, furniture: [...prev.furniture, copy] }));
       setSelectedId(copy.id);
+    } else if (selectedTextBox) {
+      const copy: TextBoxItem = {
+        ...selectedTextBox,
+        id: 'text_' + Date.now(),
+        x: selectedTextBox.x + 20,
+        y: selectedTextBox.y + 20,
+      };
+      setState((prev) => ({ ...prev, textBoxes: [...(prev.textBoxes || []), copy] }));
+      setSelectedId(copy.id);
     }
   };
 
@@ -99,6 +127,11 @@ export const PropertiesPanel: React.FC<Props> = ({
       setState((prev) => ({
         ...prev,
         furniture: prev.furniture.filter((f) => f.id !== selectedId),
+      }));
+    } else if (selectedType === 'textbox') {
+      setState((prev) => ({
+        ...prev,
+        textBoxes: (prev.textBoxes || []).filter((t) => t.id !== selectedId),
       }));
     } else if (selectedType === 'wall') {
       setState((prev) => ({
@@ -126,19 +159,33 @@ export const PropertiesPanel: React.FC<Props> = ({
   };
 
   const handleReorder = (direction: 'front' | 'back') => {
-    if (!selectedFurniture) return;
-    setState((prev) => {
-      const list = [...prev.furniture];
-      const index = list.findIndex((f) => f.id === selectedFurniture.id);
-      if (index === -1) return prev;
-      const [item] = list.splice(index, 1);
-      if (direction === 'front') {
-        list.push(item);
-      } else {
-        list.unshift(item);
-      }
-      return { ...prev, furniture: list };
-    });
+    if (selectedFurniture) {
+      setState((prev) => {
+        const list = [...prev.furniture];
+        const index = list.findIndex((f) => f.id === selectedFurniture.id);
+        if (index === -1) return prev;
+        const [item] = list.splice(index, 1);
+        if (direction === 'front') {
+          list.push(item);
+        } else {
+          list.unshift(item);
+        }
+        return { ...prev, furniture: list };
+      });
+    } else if (selectedTextBox) {
+      setState((prev) => {
+        const list = [...(prev.textBoxes || [])];
+        const index = list.findIndex((t) => t.id === selectedTextBox.id);
+        if (index === -1) return prev;
+        const [item] = list.splice(index, 1);
+        if (direction === 'front') {
+          list.push(item);
+        } else {
+          list.unshift(item);
+        }
+        return { ...prev, textBoxes: list };
+      });
+    }
   };
 
   return (
@@ -159,6 +206,30 @@ export const PropertiesPanel: React.FC<Props> = ({
               className="field-input"
             />
           </div>
+
+          {/* Custom object shape */}
+          {selectedFurniture.shape && (
+            <div className="field-group">
+              <label className="field-label">
+                Shape <span className="custom-tag">Custom</span>
+              </label>
+              {selectedFurniture.shape === 'polygon' ? (
+                <span className="info-value">Freeform outline ({selectedFurniture.points?.length ?? 0} corners)</span>
+              ) : (
+                <select
+                  className="select-dropdown"
+                  value={selectedFurniture.shape}
+                  onChange={(e) => updateFurniture({ shape: e.target.value as CustomShapeKind })}
+                >
+                  {BASIC_SHAPES.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+          )}
 
           {/* Dimensions */}
           <div className="field-row">
@@ -245,6 +316,275 @@ export const PropertiesPanel: React.FC<Props> = ({
                   onClick={() => updateFurniture({ color: c })}
                 />
               ))}
+            </div>
+          </div>
+
+          {/* Layer Ordering */}
+          <div className="field-group">
+            <label className="field-label">Z-Order</label>
+            <div className="flex gap-2">
+              <button
+                className="btn-secondary flex-1"
+                onClick={() => handleReorder('front')}
+                title="Bring to front"
+              >
+                <ArrowUp size={14} />
+                <span>Bring Front</span>
+              </button>
+              <button
+                className="btn-secondary flex-1"
+                onClick={() => handleReorder('back')}
+                title="Send to back"
+              >
+                <ArrowDown size={14} />
+                <span>Send Back</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="divider" />
+
+          {/* Action buttons */}
+          <div className="flex gap-2">
+            <button className="btn-secondary flex-1" onClick={handleDuplicate}>
+              <Copy size={15} />
+              <span>Duplicate</span>
+            </button>
+            <button className="btn-danger flex-1" onClick={handleDelete}>
+              <Trash2 size={15} />
+              <span>Delete</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Selected Text Box Inspector */}
+      {selectedTextBox && (
+        <div className="inspector-content">
+          <div className="field-group">
+            <div className="flex justify-between items-center mb-1">
+              <label className="field-label">Text Content</label>
+              <span className="custom-tag flex items-center gap-1">
+                <Type size={11} />
+                <span>Text Box</span>
+              </span>
+            </div>
+            <textarea
+              rows={3}
+              value={selectedTextBox.text}
+              onChange={(e) => updateTextBox({ text: e.target.value })}
+              className="field-input font-sans text-sm"
+              placeholder="Enter text..."
+              autoFocus
+            />
+          </div>
+
+          {/* Typography & Style controls */}
+          <div className="field-group">
+            <label className="field-label">Typography</label>
+            <div className="flex gap-2 items-center">
+              <div className="flex items-center gap-1 flex-1">
+                <span className="text-xs text-slate-500">Size:</span>
+                <input
+                  type="number"
+                  min="8"
+                  max="96"
+                  step="2"
+                  value={selectedTextBox.fontSize || 16}
+                  onChange={(e) => {
+                    const v = parseInt(e.target.value);
+                    if (!isNaN(v) && v > 0) updateTextBox({ fontSize: v });
+                  }}
+                  className="field-input w-16"
+                />
+                <span className="text-xs text-slate-400">px</span>
+              </div>
+
+              <div className="flex gap-1 items-center">
+                <button
+                  className={`tool-btn-icon ${selectedTextBox.bold ? 'active' : ''}`}
+                  onClick={() => updateTextBox({ bold: !selectedTextBox.bold })}
+                  title="Toggle Bold"
+                >
+                  <Bold size={14} />
+                </button>
+                <button
+                  className={`tool-btn-icon ${selectedTextBox.italic ? 'active' : ''}`}
+                  onClick={() => updateTextBox({ italic: !selectedTextBox.italic })}
+                  title="Toggle Italic"
+                >
+                  <Italic size={14} />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Alignment */}
+          <div className="field-group">
+            <label className="field-label">Alignment</label>
+            <div className="segmented-control">
+              <button
+                className={`segment-btn flex-1 ${(selectedTextBox.textAlign || 'center') === 'left' ? 'active' : ''}`}
+                onClick={() => updateTextBox({ textAlign: 'left' })}
+                title="Align Left"
+              >
+                <AlignLeft size={14} />
+              </button>
+              <button
+                className={`segment-btn flex-1 ${(selectedTextBox.textAlign || 'center') === 'center' ? 'active' : ''}`}
+                onClick={() => updateTextBox({ textAlign: 'center' })}
+                title="Align Center"
+              >
+                <AlignCenter size={14} />
+              </button>
+              <button
+                className={`segment-btn flex-1 ${(selectedTextBox.textAlign || 'center') === 'right' ? 'active' : ''}`}
+                onClick={() => updateTextBox({ textAlign: 'right' })}
+                title="Align Right"
+              >
+                <AlignRight size={14} />
+              </button>
+            </div>
+          </div>
+
+          {/* Text Color */}
+          <div className="field-group">
+            <label className="field-label">Text Color</label>
+            <div className="color-palette">
+              {['#0f172a', '#475569', '#2563eb', '#0284c7', '#0f766e', '#16a34a', '#b45309', '#dc2626', '#ffffff'].map((c) => (
+                <button
+                  key={c}
+                  className={`color-swatch ${selectedTextBox.color === c ? 'selected' : ''}`}
+                  style={{ backgroundColor: c, border: c === '#ffffff' ? '1px solid #cbd5e1' : undefined }}
+                  onClick={() => updateTextBox({ color: c })}
+                />
+              ))}
+            </div>
+          </div>
+
+          {/* Background Fill */}
+          <div className="field-group">
+            <label className="field-label">Background Card</label>
+            <div className="color-palette">
+              {[
+                { c: 'transparent', label: 'None' },
+                { c: '#ffffff', label: 'White' },
+                { c: '#fef08a', label: 'Yellow' },
+                { c: '#eff6ff', label: 'Blue' },
+                { c: '#f0fdf4', label: 'Green' },
+                { c: '#fef2f2', label: 'Red' },
+                { c: '#1e293b', label: 'Dark' },
+              ].map(({ c, label }) => (
+                <button
+                  key={c}
+                  className={`color-swatch ${selectedTextBox.backgroundColor === c ? 'selected' : ''}`}
+                  style={{
+                    backgroundColor: c === 'transparent' ? '#ffffff' : c,
+                    backgroundImage: c === 'transparent' ? 'linear-gradient(45deg, #ef4444 50%, transparent 50%)' : undefined,
+                    border: '1px solid #cbd5e1',
+                  }}
+                  onClick={() => updateTextBox({ backgroundColor: c })}
+                  title={label}
+                />
+              ))}
+            </div>
+          </div>
+
+          {/* Border Outline */}
+          <div className="field-group">
+            <label className="field-label">Border Style</label>
+            <div className="segmented-control">
+              <button
+                className={`segment-btn flex-1 ${(selectedTextBox.borderStyle || 'solid') === 'none' ? 'active' : ''}`}
+                onClick={() => updateTextBox({ borderStyle: 'none' })}
+              >
+                None
+              </button>
+              <button
+                className={`segment-btn flex-1 ${(selectedTextBox.borderStyle || 'solid') === 'solid' ? 'active' : ''}`}
+                onClick={() => updateTextBox({ borderStyle: 'solid' })}
+              >
+                Solid
+              </button>
+              <button
+                className={`segment-btn flex-1 ${selectedTextBox.borderStyle === 'dashed' ? 'active' : ''}`}
+                onClick={() => updateTextBox({ borderStyle: 'dashed' })}
+              >
+                Dashed
+              </button>
+            </div>
+          </div>
+
+          {/* Dimensions */}
+          <div className="field-row">
+            <div className="field-group flex-1">
+              <label className="field-label">Width ({state.unit})</label>
+              <input
+                type="number"
+                min="20"
+                step="5"
+                value={
+                  state.unit === 'm'
+                    ? (selectedTextBox.width / 100).toFixed(2)
+                    : (selectedTextBox.width / 2.54 / 12).toFixed(1)
+                }
+                onChange={(e) => {
+                  const val = parseFloat(e.target.value);
+                  if (!isNaN(val) && val > 0) {
+                    const cm = state.unit === 'm' ? val * 100 : val * 12 * 2.54;
+                    updateTextBox({ width: Math.round(cm) });
+                  }
+                }}
+                className="field-input"
+              />
+            </div>
+            <div className="field-group flex-1">
+              <label className="field-label">Height ({state.unit})</label>
+              <input
+                type="number"
+                min="15"
+                step="5"
+                value={
+                  state.unit === 'm'
+                    ? (selectedTextBox.height / 100).toFixed(2)
+                    : (selectedTextBox.height / 2.54 / 12).toFixed(1)
+                }
+                onChange={(e) => {
+                  const val = parseFloat(e.target.value);
+                  if (!isNaN(val) && val > 0) {
+                    const cm = state.unit === 'm' ? val * 100 : val * 12 * 2.54;
+                    updateTextBox({ height: Math.round(cm) });
+                  }
+                }}
+                className="field-input"
+              />
+            </div>
+          </div>
+
+          {/* Rotation Control */}
+          <div className="field-group">
+            <div className="flex justify-between items-center mb-1">
+              <label className="field-label">Rotation</label>
+              <span className="text-xs font-mono font-bold text-blue-600">
+                {selectedTextBox.rotation}°
+              </span>
+            </div>
+            <div className="flex gap-2 items-center">
+              <input
+                type="range"
+                min="0"
+                max="359"
+                value={selectedTextBox.rotation}
+                onChange={(e) => updateTextBox({ rotation: parseInt(e.target.value) })}
+                className="slider-range flex-1"
+              />
+              <button
+                className="tool-btn-icon"
+                onClick={() => handleRotate(90)}
+                title="Rotate 90 degrees clockwise"
+              >
+                <RotateCw size={15} />
+              </button>
             </div>
           </div>
 
@@ -543,6 +883,12 @@ export const PropertiesPanel: React.FC<Props> = ({
               <span>Windows:</span>
               <span className="font-mono font-semibold">{state.windows.length}</span>
             </div>
+            {(state.textBoxes || []).length > 0 && (
+              <div className="stats-row">
+                <span>Text Boxes:</span>
+                <span className="font-mono font-semibold">{(state.textBoxes || []).length}</span>
+              </div>
+            )}
           </div>
 
           {state.background && (

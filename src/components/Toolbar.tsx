@@ -18,6 +18,7 @@ import {
   Scaling,
   Undo2,
   Redo2,
+  Type,
 } from 'lucide-react';
 import { FloorplanState, ToolMode, Unit } from '../types';
 import { TEMPLATES } from '../templates';
@@ -159,6 +160,15 @@ export const Toolbar: React.FC<Props> = ({
         >
           <AppWindow size={18} />
           <span>Window</span>
+        </button>
+
+        <button
+          className={`tool-btn ${tool === 'text' ? 'active' : ''}`}
+          onClick={() => setTool('text')}
+          title="Text Box (T) — Click canvas to place a custom text box"
+        >
+          <Type size={18} />
+          <span>Text</span>
         </button>
 
         <button

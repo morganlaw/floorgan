@@ -59,7 +59,7 @@ export const App: React.FC = () => {
   const [tool, setTool] = useState<ToolMode>('select');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedType, setSelectedType] = useState<
-    'furniture' | 'wall' | 'door' | 'window' | 'measurement' | null
+    'furniture' | 'wall' | 'door' | 'window' | 'measurement' | 'textbox' | null
   >(null);
 
   // View state
@@ -76,7 +76,8 @@ export const App: React.FC = () => {
       state.walls.some((w) => w.id === selectedId) ||
       state.doors.some((d) => d.id === selectedId) ||
       state.windows.some((win) => win.id === selectedId) ||
-      state.measurements.some((m) => m.id === selectedId);
+      state.measurements.some((m) => m.id === selectedId) ||
+      (state.textBoxes || []).some((t) => t.id === selectedId);
     if (!exists) {
       setSelectedId(null);
       setSelectedType(null);
@@ -229,6 +230,10 @@ export const App: React.FC = () => {
                 <div className="shortcut-item">
                   <kbd>D</kbd>
                   <span>Place Door on Wall</span>
+                </div>
+                <div className="shortcut-item">
+                  <kbd>T</kbd>
+                  <span>Custom Text Box Tool (Click to place)</span>
                 </div>
                 <div className="shortcut-item">
                   <kbd>M</kbd>

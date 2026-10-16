@@ -19,6 +19,7 @@ import {
   ParseResult,
   RawDimensionCandidate,
   RawRoomNameCandidate,
+  OcrTextBoxPx,
   parseFloorplanImage,
   extractOcrDimensionsFromImage,
   fetchFloorplanFromUrl,
@@ -48,6 +49,7 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport 
   const [options, setOptions] = useState<ParseOptions>(DEFAULT_PARSE_OPTIONS);
   const [ocrCandidates, setOcrCandidates] = useState<RawDimensionCandidate[]>([]);
   const [roomCandidates, setRoomCandidates] = useState<RawRoomNameCandidate[]>([]);
+  const [ocrTextBoxes, setOcrTextBoxes] = useState<OcrTextBoxPx[]>([]);
   const [isScanningOcr, setIsScanningOcr] = useState<boolean>(false);
   const [useOcrScale, setUseOcrScale] = useState<boolean>(true);
   const [parseResult, setParseResult] = useState<ParseResult | null>(null);
@@ -84,6 +86,7 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport 
       setParseResult(null);
       setOcrCandidates([]);
       setRoomCandidates([]);
+      setOcrTextBoxes([]);
       return;
     }
     const img = new Image();
@@ -104,6 +107,7 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport 
         if (!cancelled) {
           setOcrCandidates(ocrRes.dimensions);
           setRoomCandidates(ocrRes.roomNames);
+          setOcrTextBoxes(ocrRes.textBoxes);
           if (ocrRes.dimensions.length > 0) {
             setUseOcrScale(true);
           }
@@ -129,10 +133,11 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport 
       options,
       ocrCandidates,
       useOcrScale,
-      roomCandidates
+      roomCandidates,
+      ocrTextBoxes
     );
     setParseResult(res);
-  }, [loadedImageEl, options, ocrCandidates, useOcrScale, roomCandidates]);
+  }, [loadedImageEl, options, ocrCandidates, useOcrScale, roomCandidates, ocrTextBoxes]);
 
   if (!isOpen) return null;
 

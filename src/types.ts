@@ -94,6 +94,25 @@ export interface RoomLabel {
   y: number; // center y in cm
 }
 
+export interface TextBoxItem {
+  id: string;
+  text: string;
+  x: number; // center x in cm
+  y: number; // center y in cm
+  width: number; // width in cm
+  height: number; // height in cm
+  fontSize: number; // font size
+  color: string; // text color
+  backgroundColor: string; // background fill ('transparent' or hex)
+  borderColor: string; // border outline
+  borderStyle: 'solid' | 'dashed' | 'none';
+  borderRadius: number; // corner radius in px
+  rotation: number; // in degrees
+  textAlign: 'left' | 'center' | 'right';
+  bold?: boolean;
+  italic?: boolean;
+}
+
 export interface BackgroundLayer {
   dataUrl: string;
   x: number; // top-left x in cm
@@ -109,6 +128,7 @@ export type ToolMode =
   | 'wall'
   | 'door'
   | 'window'
+  | 'text'
   | 'measure'
   | 'calibrate'
   | 'pan'
@@ -121,6 +141,7 @@ export interface FloorplanState {
   furniture: PlacedFurniture[];
   measurements: Measurement[];
   roomLabels?: RoomLabel[];
+  textBoxes?: TextBoxItem[];
   unit: Unit;
   gridSnap: boolean;
   gridSize: number; // in cm (e.g. 20cm or 50cm)

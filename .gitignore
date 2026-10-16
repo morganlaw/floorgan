@@ -24,3 +24,5 @@ build/
 *.njsproj
 *.sln
 *.sw?
+# OCR / Tesseract models
+*.traineddata

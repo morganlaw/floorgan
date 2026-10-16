@@ -7,6 +7,7 @@ import {
   Door,
   WindowItem,
   Measurement,
+  TextBoxItem,
 } from '../types';
 import {
   snapPointToGrid,
@@ -15,6 +16,7 @@ import {
   formatDimension,
 } from '../utils/geometry';
 import { rescaleFloorplanState } from '../utils/floorplanParser';
+import { ShapeBody } from './ShapeBody';
 
 interface Props {
   state: FloorplanState;
@@ -23,8 +25,8 @@ interface Props {
   setTool: (tool: ToolMode) => void;
   selectedId: string | null;
   setSelectedId: (id: string | null) => void;
-  selectedType: 'furniture' | 'wall' | 'door' | 'window' | 'measurement' | null;
-  setSelectedType: (type: 'furniture' | 'wall' | 'door' | 'window' | 'measurement' | null) => void;
+  selectedType: 'furniture' | 'wall' | 'door' | 'window' | 'measurement' | 'textbox' | null;
+  setSelectedType: (type: 'furniture' | 'wall' | 'door' | 'window' | 'measurement' | 'textbox' | null) => void;
   zoom: number;
   setZoom: React.Dispatch<React.SetStateAction<number>>;
   pan: Point;
@@ -71,13 +73,13 @@ export const FloorplanCanvas: React.FC<Props> = ({
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState<Point>({ x: 0, y: 0 });
 
-  // Rotating placed item (furniture, doors, windows)
+  // Rotating placed item (furniture, doors, windows, textboxes)
   const [isRotating, setIsRotating] = useState(false);
 
-  // Resizing placed item (doors, windows, furniture)
+  // Resizing placed item (doors, windows, furniture, textboxes)
   const [resizeTarget, setResizeTarget] = useState<{
     id: string;
-    type: 'door' | 'window' | 'furniture';
+    type: 'door' | 'window' | 'furniture' | 'textbox';
     handle: 'left' | 'right' | 'top' | 'bottom';
   } | null>(null);
 
@@ -236,6 +238,33 @@ export const FloorplanCanvas: React.FC<Props> = ({
           setTool('select');
         }
       }
+    } else if (tool === 'text') {
+      onStartInteraction?.();
+      const newTextBox: TextBoxItem = {
+        id: 'text_' + Date.now(),
+        text: 'Custom Text',
+        x: Math.round(snappedPoint.x),
+        y: Math.round(snappedPoint.y),
+        width: 130,
+        height: 50,
+        fontSize: 16,
+        color: '#1e293b',
+        backgroundColor: '#ffffff',
+        borderColor: '#cbd5e1',
+        borderStyle: 'solid',
+        borderRadius: 6,
+        rotation: 0,
+        textAlign: 'center',
+        bold: false,
+        italic: false,
+      };
+      setState((prev) => ({
+        ...prev,
+        textBoxes: [...(prev.textBoxes || []), newTextBox],
+      }));
+      setTool('select');
+      setSelectedId(newTextBox.id);
+      setSelectedType('textbox');
     } else if (tool === 'calibrate') {
       if (!calibStart) {
         setCalibStart(snappedPoint);
@@ -371,6 +400,43 @@ export const FloorplanCanvas: React.FC<Props> = ({
             }));
           }
         }
+      } else if (resizeTarget.type === 'textbox') {
+        const tb = (state.textBoxes || []).find((t) => t.id === selectedId);
+        if (tb) {
+          const rad = (tb.rotation * Math.PI) / 180;
+          const ux = Math.cos(rad);
+          const uy = Math.sin(rad);
+          const dx = worldPoint.x - tb.x;
+          const dy = worldPoint.y - tb.y;
+
+          if (resizeTarget.handle === 'left' || resizeTarget.handle === 'right') {
+            const proj = dx * ux + dy * uy;
+            let half = Math.abs(proj);
+            if (state.gridSnap) {
+              half = Math.max(15, Math.round(half / (state.gridSize / 2)) * (state.gridSize / 2));
+            }
+            const newWidth = Math.max(40, Math.round(half * 2));
+            setState((prev) => ({
+              ...prev,
+              textBoxes: (prev.textBoxes || []).map((t) =>
+                t.id === selectedId ? { ...t, width: newWidth } : t
+              ),
+            }));
+          } else if (resizeTarget.handle === 'top' || resizeTarget.handle === 'bottom') {
+            const projY = -dx * uy + dy * ux;
+            let half = Math.abs(projY);
+            if (state.gridSnap) {
+              half = Math.max(10, Math.round(half / (state.gridSize / 2)) * (state.gridSize / 2));
+            }
+            const newHeight = Math.max(24, Math.round(half * 2));
+            setState((prev) => ({
+              ...prev,
+              textBoxes: (prev.textBoxes || []).map((t) =>
+                t.id === selectedId ? { ...t, height: newHeight } : t
+              ),
+            }));
+          }
+        }
       }
     }
 
@@ -429,10 +495,31 @@ export const FloorplanCanvas: React.FC<Props> = ({
             ),
           }));
         }
+      } else if (selectedType === 'textbox') {
+        const item = (state.textBoxes || []).find((t) => t.id === selectedId);
+        if (item) {
+          let newX = worldPoint.x - dragOffset.x;
+          let newY = worldPoint.y - dragOffset.y;
+          if (state.gridSnap) {
+            const isRotated90 = Math.abs(Math.round(item.rotation / 90) % 2) === 1;
+            const effHalfW = isRotated90 ? item.height / 2 : item.width / 2;
+            const effHalfH = isRotated90 ? item.width / 2 : item.height / 2;
+            const left = Math.round((newX - effHalfW) / state.gridSize) * state.gridSize;
+            const top = Math.round((newY - effHalfH) / state.gridSize) * state.gridSize;
+            newX = left + effHalfW;
+            newY = top + effHalfH;
+          }
+          setState((prev) => ({
+            ...prev,
+            textBoxes: (prev.textBoxes || []).map((t) =>
+              t.id === selectedId ? { ...t, x: newX, y: newY } : t
+            ),
+          }));
+        }
       }
     }
 
-    // 360-degree free rotation for furniture, doors, and windows
+    // 360-degree free rotation for furniture, doors, windows, and textboxes
     if (isRotating && selectedId) {
       let center: Point | null = null;
       if (selectedType === 'furniture') {
@@ -443,6 +530,9 @@ export const FloorplanCanvas: React.FC<Props> = ({
         if (item) center = { x: item.x, y: item.y };
       } else if (selectedType === 'window') {
         const item = state.windows.find((w) => w.id === selectedId);
+        if (item) center = { x: item.x, y: item.y };
+      } else if (selectedType === 'textbox') {
+        const item = (state.textBoxes || []).find((t) => t.id === selectedId);
         if (item) center = { x: item.x, y: item.y };
       }
 
@@ -477,6 +567,13 @@ export const FloorplanCanvas: React.FC<Props> = ({
             ...prev,
             windows: prev.windows.map((w) =>
               w.id === selectedId ? { ...w, rotation: rot } : w
+            ),
+          }));
+        } else if (selectedType === 'textbox') {
+          setState((prev) => ({
+            ...prev,
+            textBoxes: (prev.textBoxes || []).map((t) =>
+              t.id === selectedId ? { ...t, rotation: rot } : t
             ),
           }));
         }
@@ -588,6 +685,16 @@ export const FloorplanCanvas: React.FC<Props> = ({
   // Keyboard shortcuts (Escape, Backspace, Delete)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
       if (e.key === 'Escape') {
         setWallStart(null);
         setWallCurrent(null);
@@ -601,6 +708,8 @@ export const FloorplanCanvas: React.FC<Props> = ({
         setCalibEnd(null);
         setPendingCalibDistCm(null);
         setTool('select');
+      } else if (e.key.toLowerCase() === 't' && !e.metaKey && !e.ctrlKey) {
+        setTool('text');
       } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) {
         // Delete selected element
         if (selectedType === 'furniture') {
@@ -628,6 +737,11 @@ export const FloorplanCanvas: React.FC<Props> = ({
             ...prev,
             measurements: prev.measurements.filter((m) => m.id !== selectedId),
           }));
+        } else if (selectedType === 'textbox') {
+          setState((prev) => ({
+            ...prev,
+            textBoxes: (prev.textBoxes || []).filter((t) => t.id !== selectedId),
+          }));
         }
         setSelectedId(null);
         setSelectedType(null);
@@ -642,6 +756,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
   const selectedFurniture = selectedType === 'furniture' ? state.furniture.find((f) => f.id === selectedId) : null;
   const selectedDoor = selectedType === 'door' ? state.doors.find((d) => d.id === selectedId) : null;
   const selectedWindow = selectedType === 'window' ? state.windows.find((w) => w.id === selectedId) : null;
+  const selectedTextBox = selectedType === 'textbox' ? (state.textBoxes || []).find((t) => t.id === selectedId) : null;
 
   return (
     <div className="canvas-wrapper">
@@ -1108,8 +1223,21 @@ export const FloorplanCanvas: React.FC<Props> = ({
                 }}
                 className="cursor-move"
               >
+                {/* Custom-created object body (basic shape or freeform polygon) */}
+                {item.shape && (
+                  <ShapeBody
+                    shape={item.shape}
+                    points={item.points}
+                    width={item.width}
+                    depth={item.depth}
+                    fill={item.color}
+                    stroke={isSelected ? '#2563eb' : '#0f172a'}
+                    strokeWidth={isSelected ? 3 : 1.5}
+                  />
+                )}
+
                 {/* Main furniture body: render for non-chair items or items with full bounding body */}
-                {item.iconType !== 'chair_office' && item.iconType !== 'dining_chair' && (
+                {!item.shape && item.iconType !== 'chair_office' && item.iconType !== 'dining_chair' && (
                   <rect
                     x={-halfW}
                     y={-halfD}
@@ -1443,8 +1571,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
                 )}
 
                 {/* Label: only render on larger items without detailed central graphics */}
-                {item.width >= 110 &&
-                  item.depth >= 60 &&
+                {(item.shape ? item.width >= 50 && item.depth >= 30 : item.width >= 110 && item.depth >= 60) &&
                   item.iconType !== 'chair_office' &&
                   item.iconType !== 'dining_chair' &&
                   item.iconType !== 'armchair' && (
@@ -1462,6 +1589,97 @@ export const FloorplanCanvas: React.FC<Props> = ({
                       {item.name}
                     </text>
                   )}
+              </g>
+            );
+          })}
+
+          {/* Custom Text Boxes */}
+          {(state.textBoxes || []).map((item) => {
+            const isSelected = selectedId === item.id;
+            const halfW = item.width / 2;
+            const halfH = item.height / 2;
+            const lines = (item.text || '').split('\n');
+            const lineCount = lines.length;
+            const fontSize = item.fontSize || 16;
+            const lineHeight = fontSize * 1.3;
+            const textBlockHeight = (lineCount - 1) * lineHeight;
+
+            return (
+              <g
+                key={item.id}
+                transform={`translate(${item.x}, ${item.y}) rotate(${item.rotation})`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSelectedId(item.id);
+                  setSelectedType('textbox');
+                }}
+                onPointerDown={(e) => {
+                  if (tool === 'select') {
+                    e.stopPropagation();
+                    setSelectedId(item.id);
+                    setSelectedType('textbox');
+                    setIsDragging(true);
+                    onStartInteraction?.();
+                    const worldPoint = screenToWorld(e.clientX, e.clientY);
+                    setDragOffset({ x: worldPoint.x - item.x, y: worldPoint.y - item.y });
+                  }
+                }}
+                className="cursor-move"
+              >
+                {/* Background Box */}
+                <rect
+                  x={-halfW}
+                  y={-halfH}
+                  width={item.width}
+                  height={item.height}
+                  rx={item.borderRadius ?? 6}
+                  fill={item.backgroundColor || '#ffffff'}
+                  stroke={isSelected ? '#2563eb' : item.borderColor || '#cbd5e1'}
+                  strokeWidth={isSelected ? '2.5' : item.borderStyle === 'none' ? '0' : '1.5'}
+                  strokeDasharray={item.borderStyle === 'dashed' ? '5 3' : undefined}
+                />
+
+                {/* Multiline Text */}
+                <text
+                  x={
+                    item.textAlign === 'left'
+                      ? -halfW + 12
+                      : item.textAlign === 'right'
+                      ? halfW - 12
+                      : 0
+                  }
+                  y={-textBlockHeight / 2}
+                  textAnchor={
+                    item.textAlign === 'left'
+                      ? 'start'
+                      : item.textAlign === 'right'
+                      ? 'end'
+                      : 'middle'
+                  }
+                  dominantBaseline="central"
+                  fontSize={fontSize}
+                  fontWeight={item.bold ? '700' : '500'}
+                  fontStyle={item.italic ? 'italic' : 'normal'}
+                  fill={item.color || '#1e293b'}
+                  fontFamily="system-ui, -apple-system, sans-serif"
+                  style={{ pointerEvents: 'none', userSelect: 'none' }}
+                >
+                  {lines.map((line, idx) => (
+                    <tspan
+                      key={idx}
+                      x={
+                        item.textAlign === 'left'
+                          ? -halfW + 12
+                          : item.textAlign === 'right'
+                          ? halfW - 12
+                          : 0
+                      }
+                      dy={idx === 0 ? 0 : lineHeight}
+                    >
+                      {line || ' '}
+                    </tspan>
+                  ))}
+                </text>
               </g>
             );
           })}
@@ -1742,6 +1960,114 @@ export const FloorplanCanvas: React.FC<Props> = ({
                 cx="0"
                 cy={-selectedFurniture.depth / 2 - 34}
                 r="8"
+                fill="#2563eb"
+                stroke="#ffffff"
+                strokeWidth="2"
+                className="cursor-grab active:cursor-grabbing"
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  onStartInteraction?.();
+                  setIsRotating(true);
+                }}
+              />
+            </g>
+          )}
+
+          {/* Selection Box, Edge Resizing & 360 Rotation for Selected Text Box */}
+          {selectedTextBox && (
+            <g
+              transform={`translate(${selectedTextBox.x}, ${selectedTextBox.y}) rotate(${selectedTextBox.rotation})`}
+            >
+              <rect
+                x={-selectedTextBox.width / 2 - 5}
+                y={-selectedTextBox.height / 2 - 5}
+                width={selectedTextBox.width + 10}
+                height={selectedTextBox.height + 10}
+                fill="none"
+                stroke="#2563eb"
+                strokeWidth="1.8"
+                strokeDasharray="6 3"
+                rx={(selectedTextBox.borderRadius ?? 6) + 3}
+              />
+
+              {/* Left Edge Resize Handle */}
+              <rect
+                x={-selectedTextBox.width / 2 - 9}
+                y="-10"
+                width="8"
+                height="20"
+                rx="2"
+                fill="#2563eb"
+                stroke="#ffffff"
+                strokeWidth="1.5"
+                className="cursor-ew-resize"
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  onStartInteraction?.();
+                  setResizeTarget({ id: selectedTextBox.id, type: 'textbox', handle: 'left' });
+                }}
+              />
+              {/* Right Edge Resize Handle */}
+              <rect
+                x={selectedTextBox.width / 2 + 1}
+                y="-10"
+                width="8"
+                height="20"
+                rx="2"
+                fill="#2563eb"
+                stroke="#ffffff"
+                strokeWidth="1.5"
+                className="cursor-ew-resize"
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  onStartInteraction?.();
+                  setResizeTarget({ id: selectedTextBox.id, type: 'textbox', handle: 'right' });
+                }}
+              />
+              {/* Bottom Edge Resize Handle */}
+              <rect
+                x="-10"
+                y={selectedTextBox.height / 2 + 1}
+                width="20"
+                height="8"
+                rx="2"
+                fill="#2563eb"
+                stroke="#ffffff"
+                strokeWidth="1.5"
+                className="cursor-ns-resize"
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  onStartInteraction?.();
+                  setResizeTarget({ id: selectedTextBox.id, type: 'textbox', handle: 'bottom' });
+                }}
+              />
+
+              {/* Dimension indicators on edges */}
+              <text
+                x="0"
+                y={-selectedTextBox.height / 2 - 10}
+                textAnchor="middle"
+                fontSize="10"
+                fontWeight="bold"
+                fill="#2563eb"
+                fontFamily="monospace"
+              >
+                {formatDimension(selectedTextBox.width, state.unit)} × {formatDimension(selectedTextBox.height, state.unit)}
+              </text>
+
+              {/* 360 Rotation Handle */}
+              <line
+                x1="0"
+                y1={-selectedTextBox.height / 2 - 5}
+                x2="0"
+                y2={-selectedTextBox.height / 2 - 32}
+                stroke="#2563eb"
+                strokeWidth="1.8"
+              />
+              <circle
+                cx="0"
+                cy={-selectedTextBox.height / 2 - 32}
+                r="7"
                 fill="#2563eb"
                 stroke="#ffffff"
                 strokeWidth="2"
