@@ -14,6 +14,7 @@ import {
   snapAngle,
   formatDimension,
 } from '../utils/geometry';
+import { rescaleFloorplanState } from '../utils/floorplanParser';
 
 interface Props {
   state: FloorplanState;
@@ -64,6 +65,12 @@ export const FloorplanCanvas: React.FC<Props> = ({
   // Measure tool
   const [measureStart, setMeasureStart] = useState<Point | null>(null);
   const [measureEnd, setMeasureEnd] = useState<Point | null>(null);
+
+  // Scale calibration tool
+  const [calibStart, setCalibStart] = useState<Point | null>(null);
+  const [calibEnd, setCalibEnd] = useState<Point | null>(null);
+  const [pendingCalibDistCm, setPendingCalibDistCm] = useState<number | null>(null);
+  const [calibInputValue, setCalibInputValue] = useState<string>('4.0');
 
   // Coordinate conversion: Screen pixels -> SVG canvas world coordinates (cm)
   const screenToWorld = useCallback(
@@ -183,6 +190,24 @@ export const FloorplanCanvas: React.FC<Props> = ({
           setTool('select');
         }
       }
+    } else if (tool === 'calibrate') {
+      if (!calibStart) {
+        setCalibStart(snappedPoint);
+        setCalibEnd(snappedPoint);
+      } else {
+        const finalEnd = e.shiftKey ? snapAngle(calibStart, snappedPoint) : snappedPoint;
+        const measuredCm = distance(calibStart, finalEnd);
+        if (measuredCm > 10) {
+          setPendingCalibDistCm(measuredCm);
+          const defaultVal =
+            state.unit === 'm'
+              ? (measuredCm / 100).toFixed(2)
+              : (measuredCm / 30.48).toFixed(1);
+          setCalibInputValue(defaultVal);
+          setCalibStart(null);
+          setCalibEnd(null);
+        }
+      }
     } else if (tool === 'select') {
       // Clicked on empty canvas background -> deselect
       setSelectedId(null);
@@ -209,6 +234,10 @@ export const FloorplanCanvas: React.FC<Props> = ({
 
     if (tool === 'measure' && measureStart) {
       setMeasureEnd(snappedPoint);
+    }
+
+    if (tool === 'calibrate' && calibStart) {
+      setCalibEnd(e.shiftKey ? snapAngle(calibStart, snappedPoint) : snappedPoint);
     }
 
     if (isDragging && selectedId) {
@@ -270,10 +299,19 @@ export const FloorplanCanvas: React.FC<Props> = ({
     setIsPanning(false);
     setIsDragging(false);
     setIsRotating(false);
+  };
 
-    if (tool === 'measure') {
-      // Keep measure visible until next click
+  const handleApplyCalibration = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pendingCalibDistCm) return;
+    const val = parseFloat(calibInputValue);
+    if (!isNaN(val) && val > 0) {
+      const targetCm = state.unit === 'm' ? val * 100 : val * 30.48;
+      const ratio = targetCm / pendingCalibDistCm;
+      setState((prev) => rescaleFloorplanState(prev, ratio));
     }
+    setPendingCalibDistCm(null);
+    setTool('select');
   };
 
   // Keyboard shortcuts (Escape, Backspace, Delete)
@@ -284,6 +322,9 @@ export const FloorplanCanvas: React.FC<Props> = ({
         setWallCurrent(null);
         setMeasureStart(null);
         setMeasureEnd(null);
+        setCalibStart(null);
+        setCalibEnd(null);
+        setPendingCalibDistCm(null);
         setTool('select');
       } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) {
         // Delete selected element
@@ -320,7 +361,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedId, selectedType, setState, setSelectedId, setSelectedType]);
+  }, [selectedId, selectedType, setState, setSelectedId, setSelectedType, setTool]);
 
   // Selected furniture helper
   const selectedFurniture = state.furniture.find((f) => f.id === selectedId);
@@ -362,6 +403,20 @@ export const FloorplanCanvas: React.FC<Props> = ({
         <g transform={`translate(${pan.x}, ${pan.y}) scale(${zoom})`}>
           {/* Background Grid */}
           <rect x="-5000" y="-5000" width="10000" height="10000" fill="url(#majorGrid)" />
+
+          {/* Imported Reference Floorplan Underlay */}
+          {state.background && state.background.visible && (
+            <image
+              href={state.background.dataUrl}
+              x={state.background.x}
+              y={state.background.y}
+              width={state.background.width}
+              height={state.background.height}
+              opacity={state.background.opacity}
+              preserveAspectRatio="none"
+              style={{ pointerEvents: 'none' }}
+            />
+          )}
 
           {/* Coordinate Origin Crosshair */}
           <line x1="-30" y1="0" x2="30" y2="0" stroke="#94a3b8" strokeWidth="1.5" />
@@ -618,18 +673,20 @@ export const FloorplanCanvas: React.FC<Props> = ({
                 }}
                 className="cursor-move"
               >
-                {/* Main furniture body */}
-                <rect
-                  x={-halfW}
-                  y={-halfD}
-                  width={item.width}
-                  height={item.depth}
-                  rx={item.iconType === 'table_round' ? halfW : 0}
-                  fill={item.color}
-                  fillOpacity="0.88"
-                  stroke={isSelected ? '#2563eb' : '#0f172a'}
-                  strokeWidth={isSelected ? '3' : '1.5'}
-                />
+                {/* Main furniture body: render for non-chair items or items with full bounding body */}
+                {item.iconType !== 'chair_office' && item.iconType !== 'dining_chair' && (
+                  <rect
+                    x={-halfW}
+                    y={-halfD}
+                    width={item.width}
+                    height={item.depth}
+                    rx={item.iconType === 'table_round' ? halfW : item.iconType === 'armchair' ? 4 : 0}
+                    fill={item.color}
+                    fillOpacity="0.88"
+                    stroke={isSelected ? '#2563eb' : '#0f172a'}
+                    strokeWidth={isSelected ? '3' : '1.5'}
+                  />
+                )}
 
                 {/* Architectural Internal Detailing */}
                 {/* Sofa */}
@@ -773,32 +830,47 @@ export const FloorplanCanvas: React.FC<Props> = ({
                 {/* Armchair */}
                 {item.iconType === 'armchair' && (
                   <g>
+                    {/* Backrest Cushion */}
                     <rect
-                      x={-halfW + 6}
-                      y={-halfD + 4}
-                      width={item.width - 12}
-                      height={item.depth * 0.28}
-                      rx="4"
+                      x={-halfW + 12}
+                      y={-halfD + 5}
+                      width={item.width - 24}
+                      height={20}
+                      rx="5"
                       fill="#0f172a"
                       fillOpacity="0.22"
                     />
+                    {/* Wide Armrests */}
                     <rect
                       x={-halfW + 4}
                       y={-halfD + 6}
-                      width={item.width * 0.18}
+                      width={14}
                       height={item.depth - 12}
-                      rx="3"
+                      rx="4"
                       fill="#0f172a"
-                      fillOpacity="0.22"
+                      fillOpacity="0.25"
                     />
                     <rect
-                      x={halfW - item.width * 0.18 - 4}
+                      x={halfW - 18}
                       y={-halfD + 6}
-                      width={item.width * 0.18}
+                      width={14}
                       height={item.depth - 12}
-                      rx="3"
+                      rx="4"
                       fill="#0f172a"
-                      fillOpacity="0.22"
+                      fillOpacity="0.25"
+                    />
+                    {/* Seat Cushion */}
+                    <rect
+                      x={-halfW + 20}
+                      y={-halfD + 27}
+                      width={item.width - 40}
+                      height={item.depth - 34}
+                      rx="5"
+                      fill="#ffffff"
+                      fillOpacity="0.18"
+                      stroke="#0f172a"
+                      strokeWidth="1"
+                      strokeOpacity="0.2"
                     />
                   </g>
                 )}
@@ -806,30 +878,102 @@ export const FloorplanCanvas: React.FC<Props> = ({
                 {/* Office Chair */}
                 {item.iconType === 'chair_office' && (
                   <g>
+                    {/* Hit box area for clicking and dragging */}
                     <rect
-                      x={-halfW + 8}
-                      y={-halfD + 6}
-                      width={item.width - 16}
-                      height={item.depth * 0.24}
-                      rx="4"
-                      fill="#ffffff"
-                      fillOpacity="0.25"
+                      x={-halfW}
+                      y={-halfD}
+                      width={item.width}
+                      height={item.depth}
+                      fill="transparent"
                     />
-                    <circle cx="0" cy="0" r="4" fill="#ffffff" fillOpacity="0.6" />
+                    {/* 5-Star Caster Base Spokes */}
+                    {[0, 72, 144, 216, 288].map((deg, i) => {
+                      const rad = ((deg - 90) * Math.PI) / 180;
+                      const r = 26;
+                      const x2 = Math.cos(rad) * r;
+                      const y2 = Math.sin(rad) * r + 2;
+                      return (
+                        <g key={i}>
+                          <line
+                            x1="0"
+                            y1="2"
+                            x2={x2}
+                            y2={y2}
+                            stroke="#64748b"
+                            strokeWidth="2.5"
+                            strokeLinecap="round"
+                          />
+                          <circle cx={x2} cy={y2} r="2.5" fill="#334155" />
+                        </g>
+                      );
+                    })}
+                    {/* Center Swivel Hub */}
+                    <circle cx="0" cy="2" r="4.5" fill="#1e293b" />
+                    {/* Seat Cushion */}
+                    <rect
+                      x="-20"
+                      y="-12"
+                      width="40"
+                      height="34"
+                      rx="7"
+                      fill={item.color}
+                      stroke={isSelected ? '#2563eb' : '#0f172a'}
+                      strokeWidth="1.5"
+                    />
+                    {/* Backrest Spine connector */}
+                    <line x1="0" y1="-16" x2="0" y2="-12" stroke="#0f172a" strokeWidth="3" />
+                    {/* Curved Backrest */}
+                    <rect
+                      x="-19"
+                      y="-27"
+                      width="38"
+                      height="11"
+                      rx="5"
+                      fill={item.color}
+                      stroke={isSelected ? '#2563eb' : '#0f172a'}
+                      strokeWidth="1.5"
+                    />
+                    {/* Armrest Pads */}
+                    <rect x="-26" y="-8" width="5" height="18" rx="2" fill="#1e293b" />
+                    <rect x="21" y="-8" width="5" height="18" rx="2" fill="#1e293b" />
                   </g>
                 )}
 
                 {/* Dining Chair */}
                 {item.iconType === 'dining_chair' && (
                   <g>
+                    {/* Hit box */}
                     <rect
-                      x={-halfW + 5}
-                      y={-halfD + 5}
-                      width={item.width - 10}
-                      height="7"
-                      rx="2"
-                      fill="#ffffff"
-                      fillOpacity="0.3"
+                      x={-halfW}
+                      y={-halfD}
+                      width={item.width}
+                      height={item.depth}
+                      fill="transparent"
+                    />
+                    {/* Contoured Seat */}
+                    <path
+                      d={`M ${-halfW + 4} ${-halfD + 10}
+                          L ${halfW - 4} ${-halfD + 10}
+                          L ${halfW - 2} ${halfD - 5}
+                          Q ${halfW - 2} ${halfD} ${halfW - 7} ${halfD}
+                          L ${-halfW + 7} ${halfD}
+                          Q ${-halfW + 2} ${halfD} ${-halfW + 2} ${halfD - 5}
+                          Z`}
+                      fill={item.color}
+                      fillOpacity="0.88"
+                      stroke={isSelected ? '#2563eb' : '#0f172a'}
+                      strokeWidth="1.5"
+                    />
+                    {/* Backrest Rail */}
+                    <rect
+                      x={-halfW + 3}
+                      y={-halfD + 2}
+                      width={item.width - 6}
+                      height="8"
+                      rx="3"
+                      fill="#0f172a"
+                      stroke={isSelected ? '#2563eb' : '#0f172a'}
+                      strokeWidth="1.2"
                     />
                   </g>
                 )}
@@ -863,22 +1007,26 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   </g>
                 )}
 
-                {/* Label */}
-                {item.width >= 50 && (
-                  <text
-                    x="0"
-                    y="4"
-                    textAnchor="middle"
-                    dominantBaseline="central"
-                    fontSize={Math.min(11, Math.max(8, item.width / 9))}
-                    fontWeight="600"
-                    fill="#ffffff"
-                    fontFamily="system-ui, sans-serif"
-                    style={{ pointerEvents: 'none', userSelect: 'none' }}
-                  >
-                    {item.name}
-                  </text>
-                )}
+                {/* Label: only render on larger items without detailed central graphics */}
+                {item.width >= 110 &&
+                  item.depth >= 60 &&
+                  item.iconType !== 'chair_office' &&
+                  item.iconType !== 'dining_chair' &&
+                  item.iconType !== 'armchair' && (
+                    <text
+                      x="0"
+                      y="4"
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      fontSize={Math.min(11, Math.max(8, item.width / 9))}
+                      fontWeight="600"
+                      fill="#ffffff"
+                      fontFamily="system-ui, sans-serif"
+                      style={{ pointerEvents: 'none', userSelect: 'none' }}
+                    >
+                      {item.name}
+                    </text>
+                  )}
               </g>
             );
           })}
@@ -1071,8 +1219,113 @@ export const FloorplanCanvas: React.FC<Props> = ({
               </g>
             </g>
           )}
+
+          {/* Scale Calibration Tool Preview */}
+          {calibStart && calibEnd && (
+            <g>
+              <line
+                x1={calibStart.x}
+                y1={calibStart.y}
+                x2={calibEnd.x}
+                y2={calibEnd.y}
+                stroke="#7c3aed"
+                strokeWidth="3"
+                strokeDasharray="6 3"
+              />
+              <circle cx={calibStart.x} cy={calibStart.y} r="5" fill="#7c3aed" />
+              <circle cx={calibEnd.x} cy={calibEnd.y} r="5" fill="#7c3aed" />
+              <g
+                transform={`translate(${(calibStart.x + calibEnd.x) / 2}, ${
+                  (calibStart.y + calibEnd.y) / 2
+                })`}
+              >
+                <rect
+                  x="-48"
+                  y="-13"
+                  width="96"
+                  height="26"
+                  rx="5"
+                  fill="#7c3aed"
+                  fillOpacity="0.95"
+                />
+                <text
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  fontSize="11"
+                  fontWeight="bold"
+                  fill="#ffffff"
+                  fontFamily="monospace"
+                >
+                  Calibrate: {formatDimension(distance(calibStart, calibEnd), state.unit)}
+                </text>
+              </g>
+            </g>
+          )}
         </g>
       </svg>
+
+      {/* Active Scale Calibration Instruction Banner */}
+      {tool === 'calibrate' && !pendingCalibDistCm && (
+        <div className="canvas-floating-banner">
+          <span>
+            <strong>Scale Calibration:</strong> Click the start and end of any known wall or dimension line (hold <kbd>Shift</kbd> for 90° snap).
+          </span>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => {
+              setCalibStart(null);
+              setCalibEnd(null);
+              setTool('select');
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {/* Scale Calibration Input Dialog */}
+      {pendingCalibDistCm !== null && (
+        <div className="calib-popover-backdrop">
+          <form className="calib-popover-card" onSubmit={handleApplyCalibration}>
+            <h4 className="calib-popover-title">Calibrate Floorplan Scale</h4>
+            <p className="calib-popover-desc">
+              Enter the real-world length of the reference line you just traced (currently{' '}
+              <code>{formatDimension(pendingCalibDistCm, state.unit)}</code>):
+            </p>
+            <div className="flex gap-2 items-center mt-2">
+              <input
+                type="number"
+                step="0.05"
+                min="0.2"
+                autoFocus
+                value={calibInputValue}
+                onChange={(e) => setCalibInputValue(e.target.value)}
+                className="field-input flex-1"
+              />
+              <span className="text-xs font-semibold text-slate-600">
+                {state.unit === 'm' ? 'meters (m)' : 'feet (ft)'}
+              </span>
+            </div>
+            <div className="flex justify-end gap-2 mt-3">
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => {
+                  setPendingCalibDistCm(null);
+                  setTool('select');
+                }}
+              >
+                Cancel
+              </button>
+              <button type="submit" className="btn-primary">
+                Rescale Floorplan
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 };
+

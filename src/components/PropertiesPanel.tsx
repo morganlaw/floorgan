@@ -6,8 +6,11 @@ import {
   ArrowUp,
   ArrowDown,
   Info,
+  Eye,
+  EyeOff,
+  Ruler,
 } from 'lucide-react';
-import { FloorplanState, PlacedFurniture } from '../types';
+import { FloorplanState, PlacedFurniture, ToolMode } from '../types';
 import { formatDimension, distance } from '../utils/geometry';
 
 interface Props {
@@ -17,6 +20,7 @@ interface Props {
   setSelectedId: (id: string | null) => void;
   selectedType: 'furniture' | 'wall' | 'door' | 'window' | 'measurement' | null;
   setSelectedType: (type: any) => void;
+  setTool?: (tool: ToolMode) => void;
 }
 
 export const PropertiesPanel: React.FC<Props> = ({
@@ -26,6 +30,7 @@ export const PropertiesPanel: React.FC<Props> = ({
   setSelectedId,
   selectedType,
   setSelectedType,
+  setTool,
 }) => {
   const selectedFurniture = state.furniture.find((f) => f.id === selectedId);
   const selectedWall = state.walls.find((w) => w.id === selectedId);
@@ -468,6 +473,81 @@ export const PropertiesPanel: React.FC<Props> = ({
               <span className="font-mono font-semibold">{state.windows.length}</span>
             </div>
           </div>
+
+          {state.background && (
+            <div className="stats-box mt-4">
+              <span className="stats-header">Imported Floorplan Underlay</span>
+              <div className="field-group mt-2">
+                <div className="flex justify-between items-center">
+                  <span className="text-xs text-slate-600">Opacity</span>
+                  <span className="text-xs font-mono font-semibold">
+                    {Math.round(state.background.opacity * 100)}%
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min="0.1"
+                  max="0.95"
+                  step="0.05"
+                  value={state.background.opacity}
+                  onChange={(e) =>
+                    setState((prev) =>
+                      prev.background
+                        ? {
+                            ...prev,
+                            background: {
+                              ...prev.background,
+                              opacity: parseFloat(e.target.value),
+                            },
+                          }
+                        : prev
+                    )
+                  }
+                  className="slider-range"
+                />
+              </div>
+
+              <div className="flex flex-col gap-2 mt-3">
+                <button
+                  className="btn-secondary w-full"
+                  onClick={() =>
+                    setState((prev) =>
+                      prev.background
+                        ? {
+                            ...prev,
+                            background: {
+                              ...prev.background,
+                              visible: !prev.background.visible,
+                            },
+                          }
+                        : prev
+                    )
+                  }
+                >
+                  {state.background.visible ? <EyeOff size={14} /> : <Eye size={14} />}
+                  <span>{state.background.visible ? 'Hide Underlay' : 'Show Underlay'}</span>
+                </button>
+
+                {setTool && (
+                  <button
+                    className="btn-secondary w-full"
+                    onClick={() => setTool('calibrate')}
+                  >
+                    <Ruler size={14} />
+                    <span>Calibrate Scale on Wall</span>
+                  </button>
+                )}
+
+                <button
+                  className="btn-danger w-full"
+                  onClick={() => setState((prev) => ({ ...prev, background: null }))}
+                >
+                  <Trash2 size={14} />
+                  <span>Remove Underlay</span>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </aside>

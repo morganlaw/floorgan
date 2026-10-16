@@ -5,6 +5,7 @@ import { Toolbar } from './components/Toolbar';
 import { Sidebar } from './components/Sidebar';
 import { FloorplanCanvas } from './components/FloorplanCanvas';
 import { PropertiesPanel } from './components/PropertiesPanel';
+import { ImportModal } from './components/ImportModal';
 import { HelpCircle, X } from 'lucide-react';
 import './App.css';
 
@@ -35,7 +36,12 @@ export const App: React.FC = () => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     } catch (e) {
-      console.warn('Could not save floorplan to localStorage', e);
+      // Fallback if background dataUrl exceeds localStorage quota
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, background: null }));
+      } catch (innerErr) {
+        console.warn('Could not save floorplan to localStorage', innerErr);
+      }
     }
   }, [state]);
 
@@ -49,6 +55,7 @@ export const App: React.FC = () => {
   const [zoom, setZoom] = useState<number>(0.9);
   const [pan, setPan] = useState<{ x: number; y: number }>({ x: 140, y: 100 });
   const [showHelp, setShowHelp] = useState<boolean>(false);
+  const [showImportModal, setShowImportModal] = useState<boolean>(false);
 
   return (
     <div className="app-container">
@@ -63,6 +70,7 @@ export const App: React.FC = () => {
         setPan={setPan}
         setSelectedId={setSelectedId}
         setSelectedType={setSelectedType}
+        onOpenImportModal={() => setShowImportModal(true)}
       />
 
       {/* Main Workspace */}
@@ -99,8 +107,23 @@ export const App: React.FC = () => {
           setSelectedId={setSelectedId}
           selectedType={selectedType}
           setSelectedType={setSelectedType}
+          setTool={setTool}
         />
       </div>
+
+      {/* Floorplan Image & URL Importer Modal */}
+      <ImportModal
+        isOpen={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        state={state}
+        onImport={(newState) => {
+          setState(newState);
+          setSelectedId(null);
+          setSelectedType(null);
+          setZoom(0.75);
+          setPan({ x: 120, y: 80 });
+        }}
+      />
 
       {/* Floating Keyboard Shortcuts Button */}
       <button

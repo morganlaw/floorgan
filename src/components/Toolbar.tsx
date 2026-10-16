@@ -14,6 +14,8 @@ import {
   Upload,
   FileSpreadsheet,
   Trash2,
+  ScanLine,
+  Scaling,
 } from 'lucide-react';
 import { FloorplanState, ToolMode, Unit } from '../types';
 import { TEMPLATES } from '../templates';
@@ -29,6 +31,7 @@ interface Props {
   setPan: React.Dispatch<React.SetStateAction<{ x: number; y: number }>>;
   setSelectedId: (id: string | null) => void;
   setSelectedType: (type: any) => void;
+  onOpenImportModal: () => void;
 }
 
 export const Toolbar: React.FC<Props> = ({
@@ -40,6 +43,7 @@ export const Toolbar: React.FC<Props> = ({
   setPan,
   setSelectedId,
   setSelectedType,
+  onOpenImportModal,
 }) => {
   const handleUnitToggle = (unit: Unit) => {
     setState((prev) => ({ ...prev, unit }));
@@ -157,6 +161,15 @@ export const Toolbar: React.FC<Props> = ({
         </button>
 
         <button
+          className={`tool-btn ${tool === 'calibrate' ? 'active' : ''}`}
+          onClick={() => setTool('calibrate')}
+          title="Calibrate Real-World Scale — Click two points on a wall and enter its length"
+        >
+          <Scaling size={18} />
+          <span>Calibrate</span>
+        </button>
+
+        <button
           className={`tool-btn ${tool === 'pan' ? 'active' : ''}`}
           onClick={() => setTool('pan')}
           title="Pan View (H / Middle Mouse)"
@@ -227,8 +240,17 @@ export const Toolbar: React.FC<Props> = ({
 
       <div className="divider-vertical" />
 
-      {/* Templates Selector */}
+      {/* Templates Selector & Floorplan Importer */}
       <div className="tool-group">
+        <button
+          className="tool-btn import-highlight-btn"
+          onClick={onOpenImportModal}
+          title="Import floorplan from image upload or website URL"
+        >
+          <ScanLine size={17} />
+          <span>Import Plan</span>
+        </button>
+
         <select
           className="select-dropdown"
           onChange={(e) => {

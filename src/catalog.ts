@@ -168,14 +168,4 @@ export const FURNITURE_CATALOG: FurnitureCatalogItem[] = [
     iconType: 'desk',
     description: 'Standard writing & computer desk (1.50m x 0.75m / 59" x 30")',
   },
-  {
-    catalogId: 'compact_desk',
-    name: 'Compact Desk',
-    category: 'desks',
-    width: 110,
-    depth: 60,
-    color: '#334155',
-    iconType: 'desk',
-    description: 'Compact study or laptop desk (1.10m x 0.60m / 43" x 24")',
-  },
 ];

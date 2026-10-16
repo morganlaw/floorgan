@@ -65,7 +65,25 @@ export interface Measurement {
   end: Point;
 }
 
-export type ToolMode = 'select' | 'wall' | 'door' | 'window' | 'measure' | 'pan' | 'eraser';
+export interface BackgroundLayer {
+  dataUrl: string;
+  x: number; // top-left x in cm
+  y: number; // top-left y in cm
+  width: number; // width in cm
+  height: number; // height in cm
+  opacity: number; // 0.0 to 1.0
+  visible: boolean;
+}
+
+export type ToolMode =
+  | 'select'
+  | 'wall'
+  | 'door'
+  | 'window'
+  | 'measure'
+  | 'calibrate'
+  | 'pan'
+  | 'eraser';
 
 export interface FloorplanState {
   walls: Wall[];
@@ -76,4 +94,5 @@ export interface FloorplanState {
   unit: Unit;
   gridSnap: boolean;
   gridSize: number; // in cm (e.g. 20cm or 50cm)
+  background?: BackgroundLayer | null;
 }
