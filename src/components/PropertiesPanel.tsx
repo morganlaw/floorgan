@@ -16,7 +16,7 @@ import {
   Italic,
   Type,
 } from 'lucide-react';
-import { CustomShapeKind, FloorplanState, PlacedFurniture, TextBoxItem, ToolMode } from '../types';
+import { CustomShapeKind, FloorplanState, PlacedFurniture, SelectedElementType, TextBoxItem, ToolMode } from '../types';
 import { formatDimension, distance } from '../utils/geometry';
 import { BASIC_SHAPES } from '../utils/shapes';
 
@@ -25,8 +25,10 @@ interface Props {
   setState: React.Dispatch<React.SetStateAction<FloorplanState>>;
   selectedId: string | null;
   setSelectedId: (id: string | null) => void;
-  selectedType: 'furniture' | 'wall' | 'door' | 'window' | 'measurement' | 'textbox' | null;
-  setSelectedType: (type: any) => void;
+  selectedIds?: string[];
+  setSelectedIds?: (ids: string[]) => void;
+  selectedType: SelectedElementType;
+  setSelectedType: (type: SelectedElementType) => void;
   setTool?: (tool: ToolMode) => void;
 }
 
@@ -35,6 +37,8 @@ export const PropertiesPanel: React.FC<Props> = ({
   setState,
   selectedId,
   setSelectedId,
+  selectedIds: _selectedIds = [],
+  setSelectedIds: _setSelectedIds,
   selectedType,
   setSelectedType,
   setTool,
@@ -96,6 +100,30 @@ export const PropertiesPanel: React.FC<Props> = ({
           w.id === selectedId ? { ...w, rotation: (w.rotation + deltaDegrees + 360) % 360 } : w
         ),
       }));
+    } else if (selectedWall) {
+      const midX = (selectedWall.start.x + selectedWall.end.x) / 2;
+      const midY = (selectedWall.start.y + selectedWall.end.y) / 2;
+      const len = distance(selectedWall.start, selectedWall.end);
+      const currentAngle = Math.atan2(
+        selectedWall.end.y - selectedWall.start.y,
+        selectedWall.end.x - selectedWall.start.x
+      );
+      const nextAngle = currentAngle + (deltaDegrees * Math.PI) / 180;
+      const half = len / 2;
+      const newStart = {
+        x: Math.round(midX - half * Math.cos(nextAngle)),
+        y: Math.round(midY - half * Math.sin(nextAngle)),
+      };
+      const newEnd = {
+        x: Math.round(midX + half * Math.cos(nextAngle)),
+        y: Math.round(midY + half * Math.sin(nextAngle)),
+      };
+      setState((prev) => ({
+        ...prev,
+        walls: prev.walls.map((w) =>
+          w.id === selectedId ? { ...w, start: newStart, end: newEnd } : w
+        ),
+      }));
     }
   };
 
@@ -117,6 +145,15 @@ export const PropertiesPanel: React.FC<Props> = ({
         y: selectedTextBox.y + 20,
       };
       setState((prev) => ({ ...prev, textBoxes: [...(prev.textBoxes || []), copy] }));
+      setSelectedId(copy.id);
+    } else if (selectedWall) {
+      const copy = {
+        ...selectedWall,
+        id: 'wall_' + Date.now(),
+        start: { x: selectedWall.start.x + 20, y: selectedWall.start.y + 20 },
+        end: { x: selectedWall.end.x + 20, y: selectedWall.end.y + 20 },
+      };
+      setState((prev) => ({ ...prev, walls: [...prev.walls, copy] }));
       setSelectedId(copy.id);
     }
   };
@@ -666,43 +703,148 @@ export const PropertiesPanel: React.FC<Props> = ({
       )}
 
       {/* Selected Wall Inspector */}
-      {selectedWall && (
-        <div className="inspector-content">
-          <div className="info-card">
-            <span className="info-title">Wall Segment</span>
-            <span className="info-value font-mono">
-              Length: {formatDimension(distance(selectedWall.start, selectedWall.end), state.unit)}
-            </span>
-          </div>
+      {selectedWall && (() => {
+        const wallLen = distance(selectedWall.start, selectedWall.end);
+        const angleRad = Math.atan2(
+          selectedWall.end.y - selectedWall.start.y,
+          selectedWall.end.x - selectedWall.start.x
+        );
+        let angleDeg = Math.round((angleRad * 180) / Math.PI);
+        if (angleDeg < 0) angleDeg += 360;
 
-          <div className="field-group">
-            <label className="field-label">Wall Thickness</label>
-            <div className="flex gap-2">
-              {[10, 15, 20].map((t) => (
+        return (
+          <div className="inspector-content">
+            <div className="info-card">
+              <span className="info-title">Wall Segment</span>
+              <span className="info-value font-mono">
+                {formatDimension(wallLen, state.unit)} • {angleDeg}°
+              </span>
+            </div>
+
+            {/* Exact Length Input */}
+            <div className="field-group">
+              <label className="field-label">Wall Length ({state.unit === 'm' ? 'cm' : 'in'})</label>
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  min="20"
+                  max="5000"
+                  value={Math.round(wallLen)}
+                  onChange={(e) => {
+                    const newLen = parseInt(e.target.value);
+                    if (!isNaN(newLen) && newLen >= 15) {
+                      const midX = (selectedWall.start.x + selectedWall.end.x) / 2;
+                      const midY = (selectedWall.start.y + selectedWall.end.y) / 2;
+                      const half = newLen / 2;
+                      const cos = Math.cos(angleRad);
+                      const sin = Math.sin(angleRad);
+                      setState((prev) => ({
+                        ...prev,
+                        walls: prev.walls.map((w) =>
+                          w.id === selectedWall.id
+                            ? {
+                                ...w,
+                                start: { x: Math.round(midX - half * cos), y: Math.round(midY - half * sin) },
+                                end: { x: Math.round(midX + half * cos), y: Math.round(midY + half * sin) },
+                              }
+                            : w
+                        ),
+                      }));
+                    }
+                  }}
+                  className="field-input flex-1"
+                />
+                {[100, 200, 300, 400].map((l) => (
+                  <button
+                    key={l}
+                    className={`btn-secondary ${Math.abs(wallLen - l) < 2 ? 'active' : ''}`}
+                    onClick={() => {
+                      const midX = (selectedWall.start.x + selectedWall.end.x) / 2;
+                      const midY = (selectedWall.start.y + selectedWall.end.y) / 2;
+                      const half = l / 2;
+                      const cos = Math.cos(angleRad);
+                      const sin = Math.sin(angleRad);
+                      setState((prev) => ({
+                        ...prev,
+                        walls: prev.walls.map((w) =>
+                          w.id === selectedWall.id
+                            ? {
+                                ...w,
+                                start: { x: Math.round(midX - half * cos), y: Math.round(midY - half * sin) },
+                                end: { x: Math.round(midX + half * cos), y: Math.round(midY + half * sin) },
+                              }
+                            : w
+                        ),
+                      }));
+                    }}
+                  >
+                    {l}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="field-group">
+              <label className="field-label">Wall Thickness</label>
+              <div className="flex gap-2">
+                {[10, 15, 20].map((t) => (
+                  <button
+                    key={t}
+                    className={`btn-secondary flex-1 ${selectedWall.thickness === t ? 'active' : ''}`}
+                    onClick={() =>
+                      setState((prev) => ({
+                        ...prev,
+                        walls: prev.walls.map((w) =>
+                          w.id === selectedWall.id ? { ...w, thickness: t } : w
+                        ),
+                      }))
+                    }
+                  >
+                    {t} cm
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Orientation / Rotate Controls */}
+            <div className="field-group">
+              <label className="field-label">Orientation ({angleDeg}°)</label>
+              <div className="flex gap-2">
                 <button
-                  key={t}
-                  className={`btn-secondary flex-1 ${selectedWall.thickness === t ? 'active' : ''}`}
-                  onClick={() =>
-                    setState((prev) => ({
-                      ...prev,
-                      walls: prev.walls.map((w) =>
-                        w.id === selectedWall.id ? { ...w, thickness: t } : w
-                      ),
-                    }))
-                  }
+                  className="btn-secondary flex-1"
+                  onClick={() => handleRotate(90)}
+                  title="Rotate 90 degrees clockwise"
                 >
-                  {t} cm
+                  <RotateCw size={15} />
+                  <span>Rotate 90°</span>
                 </button>
-              ))}
+                <button
+                  className="btn-secondary flex-1"
+                  onClick={() => handleRotate(45)}
+                  title="Rotate 45 degrees clockwise"
+                >
+                  <RotateCw size={15} />
+                  <span>Rotate 45°</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="divider" />
+
+            {/* Action buttons */}
+            <div className="flex gap-2">
+              <button className="btn-secondary flex-1" onClick={handleDuplicate}>
+                <Copy size={15} />
+                <span>Duplicate</span>
+              </button>
+              <button className="btn-danger flex-1" onClick={handleDelete}>
+                <Trash2 size={15} />
+                <span>Delete</span>
+              </button>
             </div>
           </div>
-
-          <button className="btn-danger w-full mt-4" onClick={handleDelete}>
-            <Trash2 size={15} />
-            <span>Delete Wall</span>
-          </button>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Selected Door Inspector */}
       {selectedDoor && (

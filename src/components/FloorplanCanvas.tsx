@@ -8,6 +8,7 @@ import {
   WindowItem,
   Measurement,
   TextBoxItem,
+  SelectedElementType,
 } from '../types';
 import {
   snapPointToGrid,
@@ -25,8 +26,10 @@ interface Props {
   setTool: (tool: ToolMode) => void;
   selectedId: string | null;
   setSelectedId: (id: string | null) => void;
-  selectedType: 'furniture' | 'wall' | 'door' | 'window' | 'measurement' | 'textbox' | null;
-  setSelectedType: (type: 'furniture' | 'wall' | 'door' | 'window' | 'measurement' | 'textbox' | null) => void;
+  selectedIds?: string[];
+  setSelectedIds?: (ids: string[]) => void;
+  selectedType: SelectedElementType;
+  setSelectedType: (type: SelectedElementType) => void;
   zoom: number;
   setZoom: React.Dispatch<React.SetStateAction<number>>;
   pan: Point;
@@ -72,6 +75,8 @@ export const FloorplanCanvas: React.FC<Props> = ({
   setTool,
   selectedId,
   setSelectedId,
+  selectedIds = [],
+  setSelectedIds,
   selectedType,
   setSelectedType,
   zoom,
@@ -86,6 +91,14 @@ export const FloorplanCanvas: React.FC<Props> = ({
   // Interaction states
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState<Point>({ x: 0, y: 0 });
+  const [isSpacePressed, setIsSpacePressed] = useState(false);
+
+  // Drag selection box state in select mode
+  const [selectionBox, setSelectionBox] = useState<{ start: Point; current: Point } | null>(null);
+
+  // Multi-item dragging support
+  const [dragStartPoint, setDragStartPoint] = useState<Point | null>(null);
+  const [dragInitialPositions, setDragInitialPositions] = useState<{ [id: string]: Point }>({});
 
   // Wall creation
   const [wallStart, setWallStart] = useState<Point | null>(null);
@@ -106,11 +119,11 @@ export const FloorplanCanvas: React.FC<Props> = ({
   // Rotating placed item (furniture, doors, windows, textboxes)
   const [isRotating, setIsRotating] = useState(false);
 
-  // Resizing placed item (doors, windows, furniture, textboxes)
+  // Resizing placed item (doors, windows, furniture, textboxes, walls)
   const [resizeTarget, setResizeTarget] = useState<{
     id: string;
-    type: 'door' | 'window' | 'furniture' | 'textbox';
-    handle: 'left' | 'right' | 'top' | 'bottom' | 'nw' | 'ne' | 'se' | 'sw';
+    type: 'door' | 'window' | 'furniture' | 'textbox' | 'wall';
+    handle: 'left' | 'right' | 'top' | 'bottom' | 'nw' | 'ne' | 'se' | 'sw' | 'start' | 'end';
   } | null>(null);
 
   // Measure tool
@@ -155,10 +168,30 @@ export const FloorplanCanvas: React.FC<Props> = ({
     setZoom(newZoom);
   };
 
+  // Spacebar pan toggle
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && !['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) {
+        setIsSpacePressed(true);
+      }
+    };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        setIsSpacePressed(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, []);
+
   // Pointer down on canvas
   const handlePointerDown = (e: React.PointerEvent) => {
-    // Middle click or Space/Pan tool triggers pan
-    if (e.button === 1 || tool === 'pan' || e.shiftKey && e.button === 0 && tool === 'select') {
+    // Middle click, Spacebar, or Pan tool triggers pan
+    if (e.button === 1 || tool === 'pan' || isSpacePressed) {
       setIsPanning(true);
       setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
       return;
@@ -314,9 +347,13 @@ export const FloorplanCanvas: React.FC<Props> = ({
         }
       }
     } else if (tool === 'select') {
-      // Clicked on empty canvas background -> deselect
-      setSelectedId(null);
-      setSelectedType(null);
+      // Clicked on empty canvas background -> start drag selection box
+      setSelectionBox({ start: worldPoint, current: worldPoint });
+      if (!e.shiftKey) {
+        setSelectedId(null);
+        setSelectedType(null);
+        setSelectedIds?.([]);
+      }
     }
   };
 
@@ -351,6 +388,10 @@ export const FloorplanCanvas: React.FC<Props> = ({
 
     if (tool === 'calibrate' && calibStart) {
       setCalibEnd(snapAngle(calibStart, snappedPoint, state.gridSize, state.gridSnap));
+    }
+
+    if (selectionBox) {
+      setSelectionBox((prev) => (prev ? { ...prev, current: worldPoint } : null));
     }
 
     // Dynamic Edge / Width Resizing by dragging handles
@@ -546,89 +587,186 @@ export const FloorplanCanvas: React.FC<Props> = ({
             ),
           }));
         }
-      }
-    }
-
-    // Dragging placed elements with grid edge-alignment
-    if (isDragging && selectedId && !resizeTarget) {
-      if (selectedType === 'furniture') {
-        const item = state.furniture.find((f) => f.id === selectedId);
-        if (item) {
-          let newX = worldPoint.x - dragOffset.x;
-          let newY = worldPoint.y - dragOffset.y;
-          if (state.gridSnap) {
-            const isRotated90 = Math.abs(Math.round(item.rotation / 90) % 2) === 1;
-            const effHalfW = isRotated90 ? item.depth / 2 : item.width / 2;
-            const effHalfD = isRotated90 ? item.width / 2 : item.depth / 2;
-            const left = Math.round((newX - effHalfW) / state.gridSize) * state.gridSize;
-            const top = Math.round((newY - effHalfD) / state.gridSize) * state.gridSize;
-            newX = left + effHalfW;
-            newY = top + effHalfD;
+      } else if (resizeTarget.type === 'wall') {
+        const wall = state.walls.find((w) => w.id === selectedId);
+        if (wall) {
+          const snappedPoint = snapPointToGrid(worldPoint, state.gridSize, state.gridSnap);
+          if (resizeTarget.handle === 'start') {
+            const finalStart = e.shiftKey
+              ? snapAngle(wall.end, snappedPoint, state.gridSize, state.gridSnap)
+              : snappedPoint;
+            if (distance(finalStart, wall.end) >= 15) {
+              setState((prev) => ({
+                ...prev,
+                walls: prev.walls.map((w) =>
+                  w.id === selectedId ? { ...w, start: finalStart } : w
+                ),
+              }));
+            }
+          } else if (resizeTarget.handle === 'end') {
+            const finalEnd = e.shiftKey
+              ? snapAngle(wall.start, snappedPoint, state.gridSize, state.gridSnap)
+              : snappedPoint;
+            if (distance(wall.start, finalEnd) >= 15) {
+              setState((prev) => ({
+                ...prev,
+                walls: prev.walls.map((w) =>
+                  w.id === selectedId ? { ...w, end: finalEnd } : w
+                ),
+              }));
+            }
           }
-          setState((prev) => ({
-            ...prev,
-            furniture: prev.furniture.map((f) =>
-              f.id === selectedId ? { ...f, x: newX, y: newY } : f
-            ),
-          }));
-        }
-      } else if (selectedType === 'door') {
-        const item = state.doors.find((d) => d.id === selectedId);
-        if (item) {
-          let newX = worldPoint.x - dragOffset.x;
-          let newY = worldPoint.y - dragOffset.y;
-          if (state.gridSnap) {
-            newX = Math.round(newX / (state.gridSize / 2)) * (state.gridSize / 2);
-            newY = Math.round(newY / (state.gridSize / 2)) * (state.gridSize / 2);
-          }
-          setState((prev) => ({
-            ...prev,
-            doors: prev.doors.map((d) =>
-              d.id === selectedId ? { ...d, x: newX, y: newY } : d
-            ),
-          }));
-        }
-      } else if (selectedType === 'window') {
-        const item = state.windows.find((w) => w.id === selectedId);
-        if (item) {
-          let newX = worldPoint.x - dragOffset.x;
-          let newY = worldPoint.y - dragOffset.y;
-          if (state.gridSnap) {
-            newX = Math.round(newX / (state.gridSize / 2)) * (state.gridSize / 2);
-            newY = Math.round(newY / (state.gridSize / 2)) * (state.gridSize / 2);
-          }
-          setState((prev) => ({
-            ...prev,
-            windows: prev.windows.map((w) =>
-              w.id === selectedId ? { ...w, x: newX, y: newY } : w
-            ),
-          }));
-        }
-      } else if (selectedType === 'textbox') {
-        const item = (state.textBoxes || []).find((t) => t.id === selectedId);
-        if (item) {
-          let newX = worldPoint.x - dragOffset.x;
-          let newY = worldPoint.y - dragOffset.y;
-          if (state.gridSnap) {
-            const isRotated90 = Math.abs(Math.round(item.rotation / 90) % 2) === 1;
-            const effHalfW = isRotated90 ? item.height / 2 : item.width / 2;
-            const effHalfH = isRotated90 ? item.width / 2 : item.height / 2;
-            const left = Math.round((newX - effHalfW) / state.gridSize) * state.gridSize;
-            const top = Math.round((newY - effHalfH) / state.gridSize) * state.gridSize;
-            newX = left + effHalfW;
-            newY = top + effHalfH;
-          }
-          setState((prev) => ({
-            ...prev,
-            textBoxes: (prev.textBoxes || []).map((t) =>
-              t.id === selectedId ? { ...t, x: newX, y: newY } : t
-            ),
-          }));
         }
       }
     }
 
-    // 360-degree free rotation for furniture, doors, windows, and textboxes
+    // Dragging placed elements with grid edge-alignment (single or multi-item)
+    if (isDragging && !resizeTarget) {
+      if (dragStartPoint && Object.keys(dragInitialPositions).length > 1) {
+        let dx = worldPoint.x - dragStartPoint.x;
+        let dy = worldPoint.y - dragStartPoint.y;
+        if (state.gridSnap) {
+          dx = Math.round(dx / state.gridSize) * state.gridSize;
+          dy = Math.round(dy / state.gridSize) * state.gridSize;
+        }
+        setState((prev) => ({
+          ...prev,
+          furniture: prev.furniture.map((f) =>
+            dragInitialPositions[f.id]
+              ? { ...f, x: dragInitialPositions[f.id].x + dx, y: dragInitialPositions[f.id].y + dy }
+              : f
+          ),
+          textBoxes: (prev.textBoxes || []).map((t) =>
+            dragInitialPositions[t.id]
+              ? { ...t, x: dragInitialPositions[t.id].x + dx, y: dragInitialPositions[t.id].y + dy }
+              : t
+          ),
+          doors: prev.doors.map((d) =>
+            dragInitialPositions[d.id]
+              ? { ...d, x: dragInitialPositions[d.id].x + dx, y: dragInitialPositions[d.id].y + dy }
+              : d
+          ),
+          windows: prev.windows.map((w) =>
+            dragInitialPositions[w.id]
+              ? { ...w, x: dragInitialPositions[w.id].x + dx, y: dragInitialPositions[w.id].y + dy }
+              : w
+          ),
+        }));
+      } else if (selectedId) {
+        if (selectedType === 'furniture') {
+          const item = state.furniture.find((f) => f.id === selectedId);
+          if (item) {
+            let newX = worldPoint.x - dragOffset.x;
+            let newY = worldPoint.y - dragOffset.y;
+            if (state.gridSnap) {
+              const isRotated90 = Math.abs(Math.round(item.rotation / 90) % 2) === 1;
+              const effHalfW = isRotated90 ? item.depth / 2 : item.width / 2;
+              const effHalfD = isRotated90 ? item.width / 2 : item.depth / 2;
+              const left = Math.round((newX - effHalfW) / state.gridSize) * state.gridSize;
+              const top = Math.round((newY - effHalfD) / state.gridSize) * state.gridSize;
+              newX = left + effHalfW;
+              newY = top + effHalfD;
+            }
+            setState((prev) => ({
+              ...prev,
+              furniture: prev.furniture.map((f) =>
+                f.id === selectedId ? { ...f, x: newX, y: newY } : f
+              ),
+            }));
+          }
+        } else if (selectedType === 'door') {
+          const item = state.doors.find((d) => d.id === selectedId);
+          if (item) {
+            let newX = worldPoint.x - dragOffset.x;
+            let newY = worldPoint.y - dragOffset.y;
+            if (state.gridSnap) {
+              newX = Math.round(newX / (state.gridSize / 2)) * (state.gridSize / 2);
+              newY = Math.round(newY / (state.gridSize / 2)) * (state.gridSize / 2);
+            }
+            setState((prev) => ({
+              ...prev,
+              doors: prev.doors.map((d) =>
+                d.id === selectedId ? { ...d, x: newX, y: newY } : d
+              ),
+            }));
+          }
+        } else if (selectedType === 'window') {
+          const item = state.windows.find((w) => w.id === selectedId);
+          if (item) {
+            let newX = worldPoint.x - dragOffset.x;
+            let newY = worldPoint.y - dragOffset.y;
+            if (state.gridSnap) {
+              newX = Math.round(newX / (state.gridSize / 2)) * (state.gridSize / 2);
+              newY = Math.round(newY / (state.gridSize / 2)) * (state.gridSize / 2);
+            }
+            setState((prev) => ({
+              ...prev,
+              windows: prev.windows.map((w) =>
+                w.id === selectedId ? { ...w, x: newX, y: newY } : w
+              ),
+            }));
+          }
+        } else if (selectedType === 'textbox') {
+          const item = (state.textBoxes || []).find((t) => t.id === selectedId);
+          if (item) {
+            let newX = worldPoint.x - dragOffset.x;
+            let newY = worldPoint.y - dragOffset.y;
+            if (state.gridSnap) {
+              const isRotated90 = Math.abs(Math.round(item.rotation / 90) % 2) === 1;
+              const effHalfW = isRotated90 ? item.height / 2 : item.width / 2;
+              const effHalfH = isRotated90 ? item.width / 2 : item.height / 2;
+              const left = Math.round((newX - effHalfW) / state.gridSize) * state.gridSize;
+              const top = Math.round((newY - effHalfH) / state.gridSize) * state.gridSize;
+              newX = left + effHalfW;
+              newY = top + effHalfH;
+            }
+            setState((prev) => ({
+              ...prev,
+              textBoxes: (prev.textBoxes || []).map((t) =>
+                t.id === selectedId ? { ...t, x: newX, y: newY } : t
+              ),
+            }));
+          }
+        } else if (selectedType === 'wall') {
+          const wall = state.walls.find((w) => w.id === selectedId);
+          if (wall) {
+            const halfDx = (wall.end.x - wall.start.x) / 2;
+            const halfDy = (wall.end.y - wall.start.y) / 2;
+            const targetMidX = worldPoint.x - dragOffset.x;
+            const targetMidY = worldPoint.y - dragOffset.y;
+
+            let newStartX = targetMidX - halfDx;
+            let newStartY = targetMidY - halfDy;
+
+            if (state.gridSnap) {
+              newStartX = Math.round(newStartX / state.gridSize) * state.gridSize;
+              newStartY = Math.round(newStartY / state.gridSize) * state.gridSize;
+            } else {
+              newStartX = Math.round(newStartX);
+              newStartY = Math.round(newStartY);
+            }
+
+            const newEndX = newStartX + (wall.end.x - wall.start.x);
+            const newEndY = newStartY + (wall.end.y - wall.start.y);
+
+            setState((prev) => ({
+              ...prev,
+              walls: prev.walls.map((w) =>
+                w.id === selectedId
+                  ? {
+                      ...w,
+                      start: { x: newStartX, y: newStartY },
+                      end: { x: newEndX, y: newEndY },
+                    }
+                  : w
+              ),
+            }));
+          }
+        }
+      }
+    }
+
+    // 360-degree free rotation for furniture, doors, windows, textboxes, and walls
     if (isRotating && selectedId) {
       let center: Point | null = null;
       if (selectedType === 'furniture') {
@@ -643,6 +781,9 @@ export const FloorplanCanvas: React.FC<Props> = ({
       } else if (selectedType === 'textbox') {
         const item = (state.textBoxes || []).find((t) => t.id === selectedId);
         if (item) center = { x: item.x, y: item.y };
+      } else if (selectedType === 'wall') {
+        const item = state.walls.find((w) => w.id === selectedId);
+        if (item) center = { x: (item.start.x + item.end.x) / 2, y: (item.start.y + item.end.y) / 2 };
       }
 
       if (center) {
@@ -685,6 +826,50 @@ export const FloorplanCanvas: React.FC<Props> = ({
               t.id === selectedId ? { ...t, rotation: rot } : t
             ),
           }));
+        } else if (selectedType === 'wall') {
+          const wall = state.walls.find((w) => w.id === selectedId);
+          if (wall) {
+            const len = distance(wall.start, wall.end);
+            const half = len / 2;
+            // The rotation handle is perpendicular to the wall axis:
+            // handle angle from center is Math.atan2(dy, dx)
+            // So wall direction is handle angle + 90 deg
+            const handleAngleRad = Math.atan2(dy, dx);
+            let wallAngleRad = handleAngleRad + Math.PI / 2;
+            if (e.shiftKey) {
+              const snapInc = Math.PI / 4; // 45 degrees
+              wallAngleRad = Math.round(wallAngleRad / snapInc) * snapInc;
+            }
+            const cos = Math.cos(wallAngleRad);
+            const sin = Math.sin(wallAngleRad);
+            let newStart = {
+              x: Math.round(center.x - half * cos),
+              y: Math.round(center.y - half * sin),
+            };
+            let newEnd = {
+              x: Math.round(center.x + half * cos),
+              y: Math.round(center.y + half * sin),
+            };
+            if (state.gridSnap) {
+              if (Math.abs(sin) < 1e-4) {
+                newStart.y = Math.round(newStart.y / state.gridSize) * state.gridSize;
+                newEnd.y = newStart.y;
+                newStart.x = Math.round(newStart.x / state.gridSize) * state.gridSize;
+                newEnd.x = Math.round(newEnd.x / state.gridSize) * state.gridSize;
+              } else if (Math.abs(cos) < 1e-4) {
+                newStart.x = Math.round(newStart.x / state.gridSize) * state.gridSize;
+                newEnd.x = newStart.x;
+                newStart.y = Math.round(newStart.y / state.gridSize) * state.gridSize;
+                newEnd.y = Math.round(newEnd.y / state.gridSize) * state.gridSize;
+              }
+            }
+            setState((prev) => ({
+              ...prev,
+              walls: prev.walls.map((w) =>
+                w.id === selectedId ? { ...w, start: newStart, end: newEnd } : w
+              ),
+            }));
+          }
         }
       }
     }
@@ -692,13 +877,102 @@ export const FloorplanCanvas: React.FC<Props> = ({
 
   // Pointer up
   const handlePointerUp = () => {
-    if (isDragging || resizeTarget || isRotating) {
+    if (isDragging || resizeTarget || isRotating || selectionBox) {
       onEndInteraction?.();
     }
     setIsPanning(false);
     setIsDragging(false);
     setIsRotating(false);
     setResizeTarget(null);
+    setDragStartPoint(null);
+    setDragInitialPositions({});
+
+    // Finalize drag selection box in select mode
+    if (selectionBox) {
+      const minX = Math.min(selectionBox.start.x, selectionBox.current.x);
+      const maxX = Math.max(selectionBox.start.x, selectionBox.current.x);
+      const minY = Math.min(selectionBox.start.y, selectionBox.current.y);
+      const maxY = Math.max(selectionBox.start.y, selectionBox.current.y);
+      const w = maxX - minX;
+      const h = maxY - minY;
+
+      if (w >= 5 || h >= 5) {
+        const boxed: { id: string; type: SelectedElementType }[] = [];
+
+        // Furniture
+        for (const f of state.furniture) {
+          const hw = f.width / 2;
+          const hd = f.depth / 2;
+          if (f.x + hw >= minX && f.x - hw <= maxX && f.y + hd >= minY && f.y - hd <= maxY) {
+            boxed.push({ id: f.id, type: 'furniture' });
+          }
+        }
+
+        // Text boxes
+        for (const t of state.textBoxes || []) {
+          const hw = t.width / 2;
+          const hh = t.height / 2;
+          if (t.x + hw >= minX && t.x - hw <= maxX && t.y + hh >= minY && t.y - hh <= maxY) {
+            boxed.push({ id: t.id, type: 'textbox' });
+          }
+        }
+
+        // Doors
+        for (const d of state.doors) {
+          const hw = d.width / 2;
+          if (d.x + hw >= minX && d.x - hw <= maxX && d.y + hw >= minY && d.y - hw <= maxY) {
+            boxed.push({ id: d.id, type: 'door' });
+          }
+        }
+
+        // Windows
+        for (const win of state.windows) {
+          const hw = win.width / 2;
+          const hh = (win.thickness || 15) / 2;
+          if (win.x + hw >= minX && win.x - hw <= maxX && win.y + hh >= minY && win.y - hh <= maxY) {
+            boxed.push({ id: win.id, type: 'window' });
+          }
+        }
+
+        // Walls
+        for (const wl of state.walls) {
+          const wMinX = Math.min(wl.start.x, wl.end.x);
+          const wMaxX = Math.max(wl.start.x, wl.end.x);
+          const wMinY = Math.min(wl.start.y, wl.end.y);
+          const wMaxY = Math.max(wl.start.y, wl.end.y);
+          if (wMaxX >= minX && wMinX <= maxX && wMaxY >= minY && wMinY <= maxY) {
+            boxed.push({ id: wl.id, type: 'wall' });
+          }
+        }
+
+        // Measurements
+        for (const m of state.measurements) {
+          const mMinX = Math.min(m.start.x, m.end.x);
+          const mMaxX = Math.max(m.start.x, m.end.x);
+          const mMinY = Math.min(m.start.y, m.end.y);
+          const mMaxY = Math.max(m.start.y, m.end.y);
+          if (mMaxX >= minX && mMinX <= maxX && mMaxY >= minY && mMinY <= maxY) {
+            boxed.push({ id: m.id, type: 'measurement' });
+          }
+        }
+
+        const ids = boxed.map((b) => b.id);
+        if (ids.length === 1) {
+          setSelectedId(boxed[0].id);
+          setSelectedType(boxed[0].type);
+          setSelectedIds?.([boxed[0].id]);
+        } else if (ids.length > 1) {
+          setSelectedId(boxed[0].id);
+          setSelectedType('multiple');
+          setSelectedIds?.(ids);
+        } else {
+          setSelectedId(null);
+          setSelectedType(null);
+          setSelectedIds?.([]);
+        }
+      }
+      setSelectionBox(null);
+    }
 
     // Finalize drag-drafting for wall
     if (tool === 'wall' && wallStart && wallCurrent) {
@@ -786,9 +1060,9 @@ export const FloorplanCanvas: React.FC<Props> = ({
   const handlePointerUpRef = useRef(handlePointerUp);
   handlePointerUpRef.current = handlePointerUp;
 
-  // Global pointer listeners to reliably handle drag, resize, rotate, or pan across window
+  // Global pointer listeners to reliably handle drag, resize, rotate, pan, or marquee selection across window
   useEffect(() => {
-    if (!isDragging && !resizeTarget && !isRotating && !isPanning) return;
+    if (!isDragging && !resizeTarget && !isRotating && !isPanning && !selectionBox) return;
     const onWindowPointerMove = (e: PointerEvent) => {
       handlePointerMoveRef.current(e as unknown as React.PointerEvent);
     };
@@ -801,9 +1075,9 @@ export const FloorplanCanvas: React.FC<Props> = ({
       window.removeEventListener('pointermove', onWindowPointerMove);
       window.removeEventListener('pointerup', onWindowPointerUp);
     };
-  }, [isDragging, resizeTarget, isRotating, isPanning]);
+  }, [isDragging, resizeTarget, isRotating, isPanning, selectionBox]);
 
-  // Keyboard shortcuts (Escape, Backspace, Delete)
+  // Keyboard shortcuts (Escape, Backspace, Delete, Spacebar pan)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
@@ -816,7 +1090,10 @@ export const FloorplanCanvas: React.FC<Props> = ({
       ) {
         return;
       }
-      if (e.key === 'Escape') {
+
+      if (e.code === 'Space' && !e.repeat) {
+        setIsSpacePressed(true);
+      } else if (e.key === 'Escape') {
         setWallStart(null);
         setWallCurrent(null);
         setDoorStart(null);
@@ -828,52 +1105,89 @@ export const FloorplanCanvas: React.FC<Props> = ({
         setCalibStart(null);
         setCalibEnd(null);
         setPendingCalibDistCm(null);
+        setSelectionBox(null);
+        setSelectedId(null);
+        setSelectedType(null);
+        setSelectedIds?.([]);
         setTool('select');
       } else if (e.key.toLowerCase() === 't' && !e.metaKey && !e.ctrlKey) {
         setTool('text');
-      } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) {
-        // Delete selected element
-        if (selectedType === 'furniture') {
-          setState((prev) => ({
-            ...prev,
-            furniture: prev.furniture.filter((f) => f.id !== selectedId),
-          }));
-        } else if (selectedType === 'wall') {
-          setState((prev) => ({
-            ...prev,
-            walls: prev.walls.filter((w) => w.id !== selectedId),
-          }));
-        } else if (selectedType === 'door') {
-          setState((prev) => ({
-            ...prev,
-            doors: prev.doors.filter((d) => d.id !== selectedId),
-          }));
-        } else if (selectedType === 'window') {
-          setState((prev) => ({
-            ...prev,
-            windows: prev.windows.filter((w) => w.id !== selectedId),
-          }));
-        } else if (selectedType === 'measurement') {
-          setState((prev) => ({
-            ...prev,
-            measurements: prev.measurements.filter((m) => m.id !== selectedId),
-          }));
-        } else if (selectedType === 'textbox') {
-          setState((prev) => ({
-            ...prev,
-            textBoxes: (prev.textBoxes || []).filter((t) => t.id !== selectedId),
-          }));
-        }
+      } else if (
+        (e.key === 'Delete' || e.key === 'Backspace') &&
+        (selectedId || (selectedIds && selectedIds.length > 0))
+      ) {
+        const idsToDelete = new Set(
+          selectedIds && selectedIds.length > 0 ? selectedIds : selectedId ? [selectedId] : []
+        );
+        setState((prev) => ({
+          ...prev,
+          furniture: prev.furniture.filter((f) => !idsToDelete.has(f.id)),
+          walls: prev.walls.filter((w) => !idsToDelete.has(w.id)),
+          doors: prev.doors.filter((d) => !idsToDelete.has(d.id)),
+          windows: prev.windows.filter((w) => !idsToDelete.has(w.id)),
+          measurements: prev.measurements.filter((m) => !idsToDelete.has(m.id)),
+          textBoxes: (prev.textBoxes || []).filter((t) => !idsToDelete.has(t.id)),
+        }));
         setSelectedId(null);
         setSelectedType(null);
+        setSelectedIds?.([]);
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        setIsSpacePressed(false);
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedId, selectedType, setState, setSelectedId, setSelectedType, setTool]);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [selectedId, selectedIds, selectedType, setState, setSelectedId, setSelectedIds, setSelectedType, setTool]);
+
+  // Selection & dragging helper functions for multi-select
+  const toggleOrSelectItem = (clickedId: string, type: SelectedElementType, isShift: boolean) => {
+    if (isShift) {
+      const exists = selectedIds.includes(clickedId);
+      const next = exists ? selectedIds.filter((id) => id !== clickedId) : [...selectedIds, clickedId];
+      setSelectedIds?.(next);
+      setSelectedId(next[next.length - 1] || null);
+      setSelectedType(next.length > 1 ? 'multiple' : next.length === 1 ? type : null);
+    } else {
+      setSelectedId(clickedId);
+      setSelectedType(type);
+      setSelectedIds?.([clickedId]);
+    }
+  };
+
+  const startDragForIds = (clickedId: string, type: SelectedElementType, worldPoint: Point, itemPos: Point) => {
+    const isAlreadyInSelection = selectedIds.includes(clickedId);
+    const activeIds = isAlreadyInSelection && selectedIds.length > 1 ? selectedIds : [clickedId];
+    if (!isAlreadyInSelection) {
+      setSelectedId(clickedId);
+      setSelectedType(type);
+      setSelectedIds?.([clickedId]);
+    }
+    setIsDragging(true);
+    onStartInteraction?.();
+    if (activeIds.length > 1) {
+      const initPos: { [id: string]: Point } = {};
+      for (const f of state.furniture) if (activeIds.includes(f.id)) initPos[f.id] = { x: f.x, y: f.y };
+      for (const t of state.textBoxes || []) if (activeIds.includes(t.id)) initPos[t.id] = { x: t.x, y: t.y };
+      for (const d of state.doors) if (activeIds.includes(d.id)) initPos[d.id] = { x: d.x, y: d.y };
+      for (const w of state.windows) if (activeIds.includes(w.id)) initPos[w.id] = { x: w.x, y: w.y };
+      setDragInitialPositions(initPos);
+      setDragStartPoint(worldPoint);
+    } else {
+      setDragOffset({ x: worldPoint.x - itemPos.x, y: worldPoint.y - itemPos.y });
+    }
+  };
 
   // Selected item helpers
+  const selectedWall = selectedType === 'wall' ? state.walls.find((w) => w.id === selectedId) : null;
   const selectedFurniture = selectedType === 'furniture' ? state.furniture.find((f) => f.id === selectedId) : null;
   const selectedDoor = selectedType === 'door' ? state.doors.find((d) => d.id === selectedId) : null;
   const selectedWindow = selectedType === 'window' ? state.windows.find((w) => w.id === selectedId) : null;
@@ -988,7 +1302,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
 
           {/* Placed Walls */}
           {state.walls.map((wall) => {
-            const isSelected = selectedId === wall.id;
+            const isSelected = selectedId === wall.id || selectedIds.includes(wall.id);
             const wallLength = distance(wall.start, wall.end);
             const midX = (wall.start.x + wall.end.x) / 2;
             const midY = (wall.start.y + wall.end.y) / 2;
@@ -998,11 +1312,30 @@ export const FloorplanCanvas: React.FC<Props> = ({
                 key={wall.id}
                 onClick={(e) => {
                   e.stopPropagation();
-                  setSelectedId(wall.id);
-                  setSelectedType('wall');
+                  toggleOrSelectItem(wall.id, 'wall', e.shiftKey);
                 }}
-                className="cursor-pointer"
+                onPointerDown={(e) => {
+                  if (tool === 'select') {
+                    e.stopPropagation();
+                    if (e.shiftKey) {
+                      toggleOrSelectItem(wall.id, 'wall', true);
+                      return;
+                    }
+                    const worldPoint = screenToWorld(e.clientX, e.clientY);
+                    startDragForIds(wall.id, 'wall', worldPoint, { x: midX, y: midY });
+                  }
+                }}
+                className={tool === 'select' ? 'cursor-move' : 'cursor-pointer'}
               >
+                {/* Invisible wider hit area for easy selection and grabbing */}
+                <line
+                  x1={wall.start.x}
+                  y1={wall.start.y}
+                  x2={wall.end.x}
+                  y2={wall.end.y}
+                  stroke="transparent"
+                  strokeWidth={Math.max(wall.thickness + 14, 26)}
+                />
                 {/* Wall body */}
                 <line
                   x1={wall.start.x}
@@ -1167,7 +1500,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
 
           {/* Doors */}
           {state.doors.map((door) => {
-            const isSelected = selectedId === door.id;
+            const isSelected = selectedId === door.id || selectedIds.includes(door.id);
             const halfW = door.width / 2;
             const isLeft = door.swingDirection !== 'right';
 
@@ -1177,18 +1510,17 @@ export const FloorplanCanvas: React.FC<Props> = ({
                 transform={`translate(${door.x}, ${door.y}) rotate(${door.rotation})`}
                 onClick={(e) => {
                   e.stopPropagation();
-                  setSelectedId(door.id);
-                  setSelectedType('door');
+                  toggleOrSelectItem(door.id, 'door', e.shiftKey);
                 }}
                 onPointerDown={(e) => {
                   if (tool === 'select') {
                     e.stopPropagation();
-                    setSelectedId(door.id);
-                    setSelectedType('door');
-                    setIsDragging(true);
-                    onStartInteraction?.();
+                    if (e.shiftKey) {
+                      toggleOrSelectItem(door.id, 'door', true);
+                      return;
+                    }
                     const worldPoint = screenToWorld(e.clientX, e.clientY);
-                    setDragOffset({ x: worldPoint.x - door.x, y: worldPoint.y - door.y });
+                    startDragForIds(door.id, 'door', worldPoint, { x: door.x, y: door.y });
                   }
                 }}
                 className="cursor-move"
@@ -1804,6 +2136,116 @@ export const FloorplanCanvas: React.FC<Props> = ({
               </g>
             );
           })}
+
+          {/* Selection Box, Endpoint Resize Handles & 360 Rotation for Selected Wall */}
+          {selectedWall && (() => {
+            const midX = (selectedWall.start.x + selectedWall.end.x) / 2;
+            const midY = (selectedWall.start.y + selectedWall.end.y) / 2;
+            const wallLength = distance(selectedWall.start, selectedWall.end);
+            const angleRad = Math.atan2(
+              selectedWall.end.y - selectedWall.start.y,
+              selectedWall.end.x - selectedWall.start.x
+            );
+            const angleDeg = (angleRad * 180) / Math.PI;
+
+            return (
+              <g key={`selected_wall_${selectedWall.id}`}>
+                {/* Wall Bounding Outline Accent & Center Rotation Stem */}
+                <g transform={`translate(${midX}, ${midY}) rotate(${angleDeg})`}>
+                  <rect
+                    x={-wallLength / 2 - 4}
+                    y={-selectedWall.thickness / 2 - 4}
+                    width={wallLength + 8}
+                    height={selectedWall.thickness + 8}
+                    fill="none"
+                    stroke="#2563eb"
+                    strokeWidth="1.8"
+                    strokeDasharray="6 3"
+                    rx="3"
+                  />
+                  {/* Floating length dimension pill badge */}
+                  <g transform={`translate(0, ${-selectedWall.thickness / 2 - 16})`}>
+                    <rect
+                      x="-36"
+                      y="-11"
+                      width="72"
+                      height="22"
+                      rx="4"
+                      fill="#1e293b"
+                      fillOpacity="0.9"
+                    />
+                    <text
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      fontSize="11"
+                      fontWeight="bold"
+                      fill="#ffffff"
+                      fontFamily="monospace"
+                    >
+                      {formatDimension(wallLength, state.unit)}
+                    </text>
+                  </g>
+                  {/* 360 Rotation Stem and Handle */}
+                  <line
+                    x1="0"
+                    y1={-selectedWall.thickness / 2 - 4}
+                    x2="0"
+                    y2={-selectedWall.thickness / 2 - 38}
+                    stroke="#2563eb"
+                    strokeWidth="1.8"
+                  />
+                  <circle
+                    cx="0"
+                    cy={-selectedWall.thickness / 2 - 38}
+                    r="8"
+                    fill="#2563eb"
+                    stroke="#ffffff"
+                    strokeWidth="2"
+                    className="cursor-grab active:cursor-grabbing"
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      onStartInteraction?.();
+                      setIsRotating(true);
+                    }}
+                  />
+                </g>
+
+                {/* Start Endpoint Resize Handle */}
+                <g transform={`translate(${selectedWall.start.x}, ${selectedWall.start.y})`}>
+                  <circle
+                    r="8"
+                    fill="#2563eb"
+                    stroke="#ffffff"
+                    strokeWidth="2.5"
+                    className="cursor-crosshair active:scale-125 transition-transform"
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      onStartInteraction?.();
+                      setResizeTarget({ id: selectedWall.id, type: 'wall', handle: 'start' });
+                    }}
+                  />
+                  <circle r="3" fill="#ffffff" style={{ pointerEvents: 'none' }} />
+                </g>
+
+                {/* End Endpoint Resize Handle */}
+                <g transform={`translate(${selectedWall.end.x}, ${selectedWall.end.y})`}>
+                  <circle
+                    r="8"
+                    fill="#2563eb"
+                    stroke="#ffffff"
+                    strokeWidth="2.5"
+                    className="cursor-crosshair active:scale-125 transition-transform"
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      onStartInteraction?.();
+                      setResizeTarget({ id: selectedWall.id, type: 'wall', handle: 'end' });
+                    }}
+                  />
+                  <circle r="3" fill="#ffffff" style={{ pointerEvents: 'none' }} />
+                </g>
+              </g>
+            );
+          })()}
 
           {/* Selection Box, Edge Resizing & 360 Rotation for Selected Door */}
           {selectedDoor && (

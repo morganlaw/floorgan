@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { FloorplanState, ToolMode } from './types';
+import { FloorplanState, SelectedElementType, ToolMode } from './types';
 import { TEMPLATES } from './templates';
 import { Toolbar } from './components/Toolbar';
 import { Sidebar } from './components/Sidebar';
@@ -58,9 +58,8 @@ export const App: React.FC = () => {
 
   const [tool, setTool] = useState<ToolMode>('select');
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [selectedType, setSelectedType] = useState<
-    'furniture' | 'wall' | 'door' | 'window' | 'measurement' | 'textbox' | null
-  >(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [selectedType, setSelectedType] = useState<SelectedElementType>(null);
 
   // View state
   const [zoom, setZoom] = useState<number>(0.9);
@@ -70,19 +69,31 @@ export const App: React.FC = () => {
 
   // Auto-deselect if selected element no longer exists (e.g. after undo)
   useEffect(() => {
-    if (!selectedId) return;
-    const exists =
-      state.furniture.some((f) => f.id === selectedId) ||
-      state.walls.some((w) => w.id === selectedId) ||
-      state.doors.some((d) => d.id === selectedId) ||
-      state.windows.some((win) => win.id === selectedId) ||
-      state.measurements.some((m) => m.id === selectedId) ||
-      (state.textBoxes || []).some((t) => t.id === selectedId);
-    if (!exists) {
-      setSelectedId(null);
-      setSelectedType(null);
+    if (!selectedId && selectedIds.length === 0) return;
+    const allExistingIds = new Set([
+      ...state.furniture.map((f) => f.id),
+      ...state.walls.map((w) => w.id),
+      ...state.doors.map((d) => d.id),
+      ...state.windows.map((win) => win.id),
+      ...state.measurements.map((m) => m.id),
+      ...(state.textBoxes || []).map((t) => t.id),
+    ]);
+
+    const nextSelectedIds = selectedIds.filter((id) => allExistingIds.has(id));
+    if (nextSelectedIds.length !== selectedIds.length) {
+      setSelectedIds(nextSelectedIds);
     }
-  }, [state, selectedId]);
+
+    if (selectedId && !allExistingIds.has(selectedId)) {
+      if (nextSelectedIds.length > 0) {
+        setSelectedId(nextSelectedIds[0]);
+        setSelectedType(nextSelectedIds.length > 1 ? 'multiple' : null);
+      } else {
+        setSelectedId(null);
+        setSelectedType(null);
+      }
+    }
+  }, [state, selectedId, selectedIds]);
 
   // Global keyboard shortcuts for Undo / Redo
   useEffect(() => {
@@ -153,6 +164,8 @@ export const App: React.FC = () => {
           setTool={setTool}
           selectedId={selectedId}
           setSelectedId={setSelectedId}
+          selectedIds={selectedIds}
+          setSelectedIds={setSelectedIds}
           selectedType={selectedType}
           setSelectedType={setSelectedType}
           zoom={zoom}
@@ -169,6 +182,8 @@ export const App: React.FC = () => {
           setState={setState}
           selectedId={selectedId}
           setSelectedId={setSelectedId}
+          selectedIds={selectedIds}
+          setSelectedIds={setSelectedIds}
           selectedType={selectedType}
           setSelectedType={setSelectedType}
           setTool={setTool}
@@ -183,6 +198,7 @@ export const App: React.FC = () => {
         onImport={(newState: FloorplanState) => {
           setState(newState);
           setSelectedId(null);
+          setSelectedIds([]);
           setSelectedType(null);
           setZoom(0.75);
           setPan({ x: 120, y: 80 });

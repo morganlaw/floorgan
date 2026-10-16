@@ -147,3 +147,13 @@ export interface FloorplanState {
   gridSize: number; // in cm (e.g. 20cm or 50cm)
   background?: BackgroundLayer | null;
 }
+
+export type SelectedElementType =
+  | 'furniture'
+  | 'wall'
+  | 'door'
+  | 'window'
+  | 'measurement'
+  | 'textbox'
+  | 'multiple'
+  | null;
