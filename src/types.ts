@@ -32,7 +32,7 @@ export interface WindowItem {
   wallId?: string;
 }
 
-export type FurnitureCategory = 'living' | 'bedroom' | 'dining' | 'office' | 'fixtures';
+export type FurnitureCategory = 'beds' | 'tables' | 'seating' | 'desks';
 
 export interface FurnitureCatalogItem {
   catalogId: string;

@@ -624,7 +624,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   y={-halfD}
                   width={item.width}
                   height={item.depth}
-                  rx="6"
+                  rx={item.iconType === 'table_round' ? halfW : 6}
                   fill={item.color}
                   fillOpacity="0.88"
                   stroke={isSelected ? '#2563eb' : '#0f172a'}
@@ -770,20 +770,115 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   </g>
                 )}
 
+                {/* Armchair */}
+                {item.iconType === 'armchair' && (
+                  <g>
+                    <rect
+                      x={-halfW + 6}
+                      y={-halfD + 4}
+                      width={item.width - 12}
+                      height={item.depth * 0.28}
+                      rx="4"
+                      fill="#0f172a"
+                      fillOpacity="0.22"
+                    />
+                    <rect
+                      x={-halfW + 4}
+                      y={-halfD + 6}
+                      width={item.width * 0.18}
+                      height={item.depth - 12}
+                      rx="3"
+                      fill="#0f172a"
+                      fillOpacity="0.22"
+                    />
+                    <rect
+                      x={halfW - item.width * 0.18 - 4}
+                      y={-halfD + 6}
+                      width={item.width * 0.18}
+                      height={item.depth - 12}
+                      rx="3"
+                      fill="#0f172a"
+                      fillOpacity="0.22"
+                    />
+                  </g>
+                )}
+
+                {/* Office Chair */}
+                {item.iconType === 'chair_office' && (
+                  <g>
+                    <rect
+                      x={-halfW + 8}
+                      y={-halfD + 6}
+                      width={item.width - 16}
+                      height={item.depth * 0.24}
+                      rx="4"
+                      fill="#ffffff"
+                      fillOpacity="0.25"
+                    />
+                    <circle cx="0" cy="0" r="4" fill="#ffffff" fillOpacity="0.6" />
+                  </g>
+                )}
+
+                {/* Dining Chair */}
+                {item.iconType === 'dining_chair' && (
+                  <g>
+                    <rect
+                      x={-halfW + 5}
+                      y={-halfD + 5}
+                      width={item.width - 10}
+                      height="7"
+                      rx="2"
+                      fill="#ffffff"
+                      fillOpacity="0.3"
+                    />
+                  </g>
+                )}
+
+                {/* Round Table Detail */}
+                {item.iconType === 'table_round' && (
+                  <circle
+                    cx="0"
+                    cy="0"
+                    r={Math.max(halfW - 8, 4)}
+                    fill="none"
+                    stroke="#ffffff"
+                    strokeWidth="1.5"
+                    strokeOpacity="0.35"
+                  />
+                )}
+
+                {/* Nightstand Detail */}
+                {item.iconType === 'nightstand' && (
+                  <g>
+                    <line
+                      x1={-halfW + 6}
+                      y1={0}
+                      x2={halfW - 6}
+                      y2={0}
+                      stroke="#ffffff"
+                      strokeWidth="1.5"
+                      strokeOpacity="0.35"
+                    />
+                    <circle cx="0" cy="0" r="2.5" fill="#ffffff" fillOpacity="0.7" />
+                  </g>
+                )}
+
                 {/* Label */}
-                <text
-                  x="0"
-                  y="4"
-                  textAnchor="middle"
-                  dominantBaseline="central"
-                  fontSize="11"
-                  fontWeight="600"
-                  fill="#ffffff"
-                  fontFamily="system-ui, sans-serif"
-                  style={{ pointerEvents: 'none', userSelect: 'none' }}
-                >
-                  {item.name}
-                </text>
+                {item.width >= 50 && (
+                  <text
+                    x="0"
+                    y="4"
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    fontSize={Math.min(11, Math.max(8, item.width / 9))}
+                    fontWeight="600"
+                    fill="#ffffff"
+                    fontFamily="system-ui, sans-serif"
+                    style={{ pointerEvents: 'none', userSelect: 'none' }}
+                  >
+                    {item.name}
+                  </text>
+                )}
               </g>
             );
           })}

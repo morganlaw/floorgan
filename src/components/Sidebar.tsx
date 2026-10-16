@@ -2,9 +2,8 @@ import React, { useState } from 'react';
 import {
   Armchair,
   Bed,
-  Utensils,
+  Table,
   Briefcase,
-  Bath,
   Search,
   Plus,
 } from 'lucide-react';
@@ -35,11 +34,10 @@ export const Sidebar: React.FC<Props> = ({
 
   const categories = [
     { id: 'all', label: 'All Items', icon: null },
-    { id: 'living', label: 'Living', icon: <Armchair size={15} /> },
-    { id: 'bedroom', label: 'Bedroom', icon: <Bed size={15} /> },
-    { id: 'dining', label: 'Dining', icon: <Utensils size={15} /> },
-    { id: 'office', label: 'Office', icon: <Briefcase size={15} /> },
-    { id: 'fixtures', label: 'Fixtures', icon: <Bath size={15} /> },
+    { id: 'beds', label: 'Beds', icon: <Bed size={15} /> },
+    { id: 'tables', label: 'Tables', icon: <Table size={15} /> },
+    { id: 'seating', label: 'Chairs & Sofas', icon: <Armchair size={15} /> },
+    { id: 'desks', label: 'Desks', icon: <Briefcase size={15} /> },
   ];
 
   const filteredItems = FURNITURE_CATALOG.filter((item) => {
@@ -76,7 +74,7 @@ export const Sidebar: React.FC<Props> = ({
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
-        <h2 className="sidebar-title">Furniture & Fixtures</h2>
+        <h2 className="sidebar-title">Furniture Catalog</h2>
         <span className="sidebar-badge">{filteredItems.length} items</span>
       </div>
 
@@ -85,7 +83,7 @@ export const Sidebar: React.FC<Props> = ({
         <Search size={16} className="search-icon" />
         <input
           type="text"
-          placeholder="Search catalog (sofa, bed, table)..."
+          placeholder="Search catalog (bed, desk, table, chair)..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           className="search-input"
