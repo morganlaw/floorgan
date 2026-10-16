@@ -102,7 +102,7 @@ export const TEMPLATES: Record<string, { name: string; state: FloorplanState }> 
           id: 'f6',
           catalogId: 'office_desk',
           name: 'Standard Desk',
-          category: 'desks',
+          category: 'tables',
           x: 220,
           y: 580,
           width: 150,

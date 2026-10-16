@@ -6,30 +6,41 @@ import { Sidebar } from './components/Sidebar';
 import { FloorplanCanvas } from './components/FloorplanCanvas';
 import { PropertiesPanel } from './components/PropertiesPanel';
 import { ImportModal } from './components/ImportModal';
+import { useFloorplanHistory } from './utils/useHistory';
 import { HelpCircle, X } from 'lucide-react';
 import './App.css';
 
 const STORAGE_KEY = 'floorgan_floorplan_v1';
 
-export const App: React.FC = () => {
-  // Load saved floorplan from browser localStorage or default to studio template
-  const [state, setState] = useState<FloorplanState>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY) || localStorage.getItem('mapgan_floorplan_v1');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed && Array.isArray(parsed.walls)) {
-          return {
-            ...parsed,
-            measurements: parsed.measurements || [],
-          };
-        }
+function getInitialFloorplan(): FloorplanState {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY) || localStorage.getItem('mapgan_floorplan_v1');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (parsed && Array.isArray(parsed.walls)) {
+        return {
+          ...parsed,
+          measurements: parsed.measurements || [],
+        };
       }
-    } catch (e) {
-      console.warn('Could not load saved floorplan from localStorage', e);
     }
-    return TEMPLATES.studio.state;
-  });
+  } catch (e) {
+    console.warn('Could not load saved floorplan from localStorage', e);
+  }
+  return TEMPLATES.studio.state;
+}
+
+export const App: React.FC = () => {
+  const {
+    state,
+    setState,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
+    startInteraction,
+    endInteraction,
+  } = useFloorplanHistory(getInitialFloorplan());
 
   // Automatically persist state changes to browser localStorage
   useEffect(() => {
@@ -57,6 +68,52 @@ export const App: React.FC = () => {
   const [showHelp, setShowHelp] = useState<boolean>(false);
   const [showImportModal, setShowImportModal] = useState<boolean>(false);
 
+  // Auto-deselect if selected element no longer exists (e.g. after undo)
+  useEffect(() => {
+    if (!selectedId) return;
+    const exists =
+      state.furniture.some((f) => f.id === selectedId) ||
+      state.walls.some((w) => w.id === selectedId) ||
+      state.doors.some((d) => d.id === selectedId) ||
+      state.windows.some((win) => win.id === selectedId) ||
+      state.measurements.some((m) => m.id === selectedId);
+    if (!exists) {
+      setSelectedId(null);
+      setSelectedType(null);
+    }
+  }, [state, selectedId]);
+
+  // Global keyboard shortcuts for Undo / Redo
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+      ) {
+        return;
+      }
+
+      const isMac = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform);
+      const cmdOrCtrl = isMac ? e.metaKey : e.ctrlKey;
+
+      if (cmdOrCtrl && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) {
+          redo();
+        } else {
+          undo();
+        }
+      } else if (cmdOrCtrl && e.key.toLowerCase() === 'y') {
+        e.preventDefault();
+        redo();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [undo, redo]);
+
   return (
     <div className="app-container">
       {/* Top Application Toolbar */}
@@ -71,6 +128,10 @@ export const App: React.FC = () => {
         setSelectedId={setSelectedId}
         setSelectedType={setSelectedType}
         onOpenImportModal={() => setShowImportModal(true)}
+        undo={undo}
+        redo={redo}
+        canUndo={canUndo}
+        canRedo={canRedo}
       />
 
       {/* Main Workspace */}
@@ -97,6 +158,8 @@ export const App: React.FC = () => {
           setZoom={setZoom}
           pan={pan}
           setPan={setPan}
+          onStartInteraction={startInteraction}
+          onEndInteraction={endInteraction}
         />
 
         {/* Right Properties Inspector */}
@@ -147,6 +210,14 @@ export const App: React.FC = () => {
             </div>
             <div className="modal-body">
               <div className="shortcuts-grid">
+                <div className="shortcut-item">
+                  <kbd>⌘Z</kbd> / <kbd>Ctrl+Z</kbd>
+                  <span>Undo last action</span>
+                </div>
+                <div className="shortcut-item">
+                  <kbd>⌘⇧Z</kbd> / <kbd>Ctrl+Y</kbd>
+                  <span>Redo action</span>
+                </div>
                 <div className="shortcut-item">
                   <kbd>V</kbd>
                   <span>Select & Move Tool</span>

@@ -157,11 +157,10 @@ export const FURNITURE_CATALOG: FurnitureCatalogItem[] = [
     description: 'Standard dining room chair (0.48m x 0.52m / 19" x 20")',
   },
 
-  // Desks
   {
     catalogId: 'office_desk',
     name: 'Standard Desk',
-    category: 'desks',
+    category: 'tables',
     width: 150,
     depth: 75,
     color: '#1e293b',

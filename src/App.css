@@ -92,6 +92,13 @@
   border-color: #bfdbfe;
 }
 
+.tool-btn:disabled,
+.tool-btn-icon:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 .tool-btn-icon {
   display: flex;
   align-items: center;

@@ -16,6 +16,8 @@ import {
   Trash2,
   ScanLine,
   Scaling,
+  Undo2,
+  Redo2,
 } from 'lucide-react';
 import { FloorplanState, ToolMode, Unit } from '../types';
 import { TEMPLATES } from '../templates';
@@ -32,6 +34,10 @@ interface Props {
   setSelectedId: (id: string | null) => void;
   setSelectedType: (type: any) => void;
   onOpenImportModal: () => void;
+  undo: () => void;
+  redo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
 }
 
 export const Toolbar: React.FC<Props> = ({
@@ -44,6 +50,10 @@ export const Toolbar: React.FC<Props> = ({
   setSelectedId,
   setSelectedType,
   onOpenImportModal,
+  undo,
+  redo,
+  canUndo,
+  canRedo,
 }) => {
   const handleUnitToggle = (unit: Unit) => {
     setState((prev) => ({ ...prev, unit }));
@@ -180,6 +190,29 @@ export const Toolbar: React.FC<Props> = ({
       </div>
 
       <div className="divider-vertical" />
+
+      {/* Undo & Redo History Controls */}
+      <div className="tool-group">
+        <button
+          className="tool-btn"
+          onClick={undo}
+          disabled={!canUndo}
+          title="Undo last action (Ctrl+Z / Cmd+Z)"
+        >
+          <Undo2 size={18} />
+          <span>Undo</span>
+        </button>
+
+        <button
+          className="tool-btn"
+          onClick={redo}
+          disabled={!canRedo}
+          title="Redo action (Ctrl+Y / Cmd+Shift+Z)"
+        >
+          <Redo2 size={18} />
+          <span>Redo</span>
+        </button>
+      </div>
 
       {/* Grid Snap & Unit Toggle */}
       <div className="tool-group">

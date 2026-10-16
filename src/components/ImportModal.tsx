@@ -18,6 +18,7 @@ import {
   DEFAULT_PARSE_OPTIONS,
   ParseResult,
   RawDimensionCandidate,
+  RawRoomNameCandidate,
   parseFloorplanImage,
   extractOcrDimensionsFromImage,
   fetchFloorplanFromUrl,
@@ -46,6 +47,7 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport 
   // Deterministic CV + OCR Parser options
   const [options, setOptions] = useState<ParseOptions>(DEFAULT_PARSE_OPTIONS);
   const [ocrCandidates, setOcrCandidates] = useState<RawDimensionCandidate[]>([]);
+  const [roomCandidates, setRoomCandidates] = useState<RawRoomNameCandidate[]>([]);
   const [isScanningOcr, setIsScanningOcr] = useState<boolean>(false);
   const [useOcrScale, setUseOcrScale] = useState<boolean>(true);
   const [parseResult, setParseResult] = useState<ParseResult | null>(null);
@@ -81,6 +83,7 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport 
       setLoadedImageEl(null);
       setParseResult(null);
       setOcrCandidates([]);
+      setRoomCandidates([]);
       return;
     }
     const img = new Image();
@@ -90,17 +93,18 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport 
     img.src = imageDataUrl;
   }, [imageDataUrl]);
 
-  // Run deterministic client-side OCR to detect printed room/wall dimensions
+  // Run deterministic client-side OCR to detect printed room names & dimensions
   useEffect(() => {
     if (!loadedImageEl) return;
     let cancelled = false;
     setIsScanningOcr(true);
 
     extractOcrDimensionsFromImage(loadedImageEl, options.invert)
-      .then((cands) => {
+      .then((ocrRes) => {
         if (!cancelled) {
-          setOcrCandidates(cands);
-          if (cands.length > 0) {
+          setOcrCandidates(ocrRes.dimensions);
+          setRoomCandidates(ocrRes.roomNames);
+          if (ocrRes.dimensions.length > 0) {
             setUseOcrScale(true);
           }
         }
@@ -120,9 +124,15 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport 
   // Re-run deterministic CV pipeline whenever image, options, or OCR candidates change
   useEffect(() => {
     if (!loadedImageEl) return;
-    const res = parseFloorplanImage(loadedImageEl, options, ocrCandidates, useOcrScale);
+    const res = parseFloorplanImage(
+      loadedImageEl,
+      options,
+      ocrCandidates,
+      useOcrScale,
+      roomCandidates
+    );
     setParseResult(res);
-  }, [loadedImageEl, options, ocrCandidates, useOcrScale]);
+  }, [loadedImageEl, options, ocrCandidates, useOcrScale, roomCandidates]);
 
   if (!isOpen) return null;
 
@@ -190,6 +200,7 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport 
       windows: parseResult.windows,
       furniture: keepExistingFurniture ? state.furniture : [],
       measurements: [],
+      roomLabels: parseResult.roomLabels,
       background: includeUnderlay
         ? {
             dataUrl: imageDataUrl,
@@ -344,13 +355,13 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport 
               </div>
             )}
 
-            {/* OCR Dimension Auto-Calibration Status Box */}
+            {/* OCR Dimension & Room Name Auto-Calibration Status Box */}
             {imageDataUrl && (
               <div className="ocr-status-box">
                 <div className="flex justify-between items-center">
                   <div className="flex items-center gap-2">
                     <Ruler size={14} className="text-blue-600" />
-                    <span className="field-label">Photo Dimension Reader (OCR)</span>
+                    <span className="field-label">Photo Room & Dimension Reader (OCR)</span>
                   </div>
                   {isScanningOcr && (
                     <span className="text-xs text-slate-500 flex items-center gap-1">
@@ -359,9 +370,18 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport 
                   )}
                 </div>
 
-                {!isScanningOcr && parseResult && parseResult.detectedDimensions.length > 0 ? (
+                {!isScanningOcr &&
+                parseResult &&
+                (parseResult.detectedDimensions.length > 0 ||
+                  parseResult.roomLabels.length > 0) ? (
                   <>
                     <div className="ocr-chips">
+                      {parseResult.roomLabels.map((r) => (
+                        <span key={r.id} className="ocr-chip">
+                          {r.name}
+                          {r.dimensionsText ? ` (${r.dimensionsText})` : ''}
+                        </span>
+                      ))}
                       {parseResult.detectedDimensions.map((d, i) => (
                         <span
                           key={i}

@@ -5,6 +5,7 @@ import {
   WindowItem,
   PlacedFurniture,
   FloorplanState,
+  RoomLabel,
   Unit,
 } from '../types';
 
@@ -61,11 +62,18 @@ export interface RawDimensionCandidate {
   cyPx: number;
 }
 
+export interface RawRoomNameCandidate {
+  name: string;
+  cxPx: number;
+  cyPx: number;
+}
+
 export interface ParseResult {
   walls: Wall[];
   doors: Door[];
   windows: WindowItem[];
   furniture: PlacedFurniture[];
+  roomLabels: RoomLabel[];
   maskPreviewDataUrl: string;
   computedThreshold: number;
   originOffset: { x: number; y: number };
@@ -782,17 +790,50 @@ function matchDimensionsToPixelWalls(
 }
 
 /**
- * Runs client-side Tesseract OCR on the floorplan image (with thick structural walls masked out
- * so wall boxes don't confuse text recognition) and extracts all dimension labels and coordinates.
+ * Recognizes standard architectural room names from OCR text lines.
+ */
+export function parseRoomNameText(text: string): string | null {
+  const cleaned = text.replace(/[^a-zA-Z0-9 &/.-]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (cleaned.length < 3) return null;
+
+  const roomPatterns: [RegExp, string][] = [
+    [/\b(primary|master|main)\s+bed(room)?\b/i, 'Primary Bedroom'],
+    [/\bbed(room)?\s*\d*\b/i, 'Bedroom'],
+    [/\bliving\s*(&|and|\/)?\s*dining\b/i, 'Living & Dining'],
+    [/\bliving(\s+room|\s+area)?\b/i, 'Living Room'],
+    [/\bdining(\s+room|\s+area)?\b/i, 'Dining Room'],
+    [/\bkitchen(ette)?\b/i, 'Kitchen'],
+    [/\bbath(room)?\s*\d*\b/i, 'Bathroom'],
+    [/\b(restroom|powder\s*room|wc)\b/i, 'Bathroom'],
+    [/\b(home\s+)?(office|study|den)\b/i, 'Office'],
+    [/\b(walk[- ]?in\s+)?closet\b/i, 'Closet'],
+    [/\b(foyer|entry(way)?|vestibule)\b/i, 'Entry / Foyer'],
+    [/\b(balcony|terrace|patio|deck)\b/i, 'Balcony'],
+    [/\b(laundry|utility)\b/i, 'Laundry'],
+    [/\b(hall(way)?|corridor)\b/i, 'Hallway'],
+    [/\bgarage\b/i, 'Garage'],
+    [/\bstudio\b/i, 'Studio'],
+  ];
+
+  for (const [regex, canonicalName] of roomPatterns) {
+    if (regex.test(cleaned)) {
+      return canonicalName;
+    }
+  }
+  return null;
+}
+
+/**
+ * Runs client-side Tesseract OCR on the floorplan image and extracts both
+ * printed dimension strings ("5.2m x 3.4m") and room name labels ("Bedroom", "Kitchen", "Bathroom").
  */
 export async function extractOcrDimensionsFromImage(
   img: HTMLImageElement,
   invert = false
-): Promise<RawDimensionCandidate[]> {
+): Promise<{ dimensions: RawDimensionCandidate[]; roomNames: RawRoomNameCandidate[] }> {
   const naturalW = img.naturalWidth || img.width || 600;
   const naturalH = img.naturalHeight || img.height || 450;
 
-  // Use higher resolution for crisp OCR text recognition (up to 1400px) while mapping back to MAX_PROC_DIM
   const ocrScale = Math.min(2.0, 1400 / Math.max(naturalW, naturalH));
   const ocrW = Math.max(120, Math.round(naturalW * ocrScale));
   const ocrH = Math.max(120, Math.round(naturalH * ocrScale));
@@ -825,31 +866,43 @@ export async function extractOcrDimensionsFromImage(
       tessedit_pageseg_mode: Tesseract.PSM.SPARSE_TEXT,
     });
     const result = await worker.recognize(canvas, {}, { blocks: true });
-    const candidates: RawDimensionCandidate[] = [];
+    const dimensions: RawDimensionCandidate[] = [];
+    const roomNames: RawRoomNameCandidate[] = [];
 
     const blocks = result.data?.blocks || [];
     for (const block of blocks) {
       for (const para of block.paragraphs || []) {
         for (const line of para.lines || []) {
-          const parsed = parseDimensionText(line.text);
-          if (parsed && line.bbox) {
-            const cxOcr = (line.bbox.x0 + line.bbox.x1) / 2;
-            const cyOcr = (line.bbox.y0 + line.bbox.y1) / 2;
-            candidates.push({
-              rawText: parsed.matchedText,
-              kind: parsed.kind,
-              unit: parsed.unit,
-              val1Cm: parsed.val1Cm,
-              val2Cm: parsed.val2Cm,
-              cxPx: (cxOcr / ocrW) * procW,
-              cyPx: (cyOcr / ocrH) * procH,
+          if (!line.bbox) continue;
+          const cxPx = (((line.bbox.x0 + line.bbox.x1) / 2) / ocrW) * procW;
+          const cyPx = (((line.bbox.y0 + line.bbox.y1) / 2) / ocrH) * procH;
+
+          const parsedDim = parseDimensionText(line.text);
+          if (parsedDim) {
+            dimensions.push({
+              rawText: parsedDim.matchedText,
+              kind: parsedDim.kind,
+              unit: parsedDim.unit,
+              val1Cm: parsedDim.val1Cm,
+              val2Cm: parsedDim.val2Cm,
+              cxPx,
+              cyPx,
+            });
+          }
+
+          const parsedRoom = parseRoomNameText(line.text);
+          if (parsedRoom) {
+            roomNames.push({
+              name: parsedRoom,
+              cxPx,
+              cyPx,
             });
           }
         }
       }
     }
 
-    return candidates;
+    return { dimensions, roomNames };
   } finally {
     await worker.terminate();
   }
@@ -1110,7 +1163,8 @@ export function parseFloorplanImage(
   img: HTMLImageElement,
   options: ParseOptions,
   ocrCandidates: RawDimensionCandidate[] = [],
-  useOcrScale = true
+  useOcrScale = true,
+  roomCandidates: RawRoomNameCandidate[] = []
 ): ParseResult {
   const naturalW = img.naturalWidth || img.width || 600;
   const naturalH = img.naturalHeight || img.height || 450;
@@ -1190,7 +1244,6 @@ export function parseFloorplanImage(
 
   const spanPxW = Math.max(50, maxPxX - minPxX);
 
-  // Extract initial pixel segments for OCR ray-casting room & wall matching
   const prelimSegmentsPx = extractDirectionalWallSegments(
     structuralMask,
     w,
@@ -1251,6 +1304,26 @@ export function parseFloorplanImage(
     yCm: Math.round(ocrCandidates[idx].cyPx * cmPerPx + ORIGIN_OFFSET_Y),
   }));
 
+  // Pair detected room names (e.g., "Living Room", "Bedroom", "Kitchen") with their nearest dimension label
+  const roomLabels: RoomLabel[] = roomCandidates.map((rm, idx) => {
+    let bestDimText: string | undefined;
+    let bestDistPx = 90;
+    for (const dim of ocrCandidates) {
+      const dist = Math.hypot(dim.cxPx - rm.cxPx, dim.cyPx - rm.cyPx);
+      if (dist < bestDistPx) {
+        bestDistPx = dist;
+        bestDimText = dim.rawText;
+      }
+    }
+    return {
+      id: `room_imp_${idx + 1}_${Date.now().toString(36)}`,
+      name: rm.name,
+      dimensionsText: bestDimText,
+      x: Math.round(rm.cxPx * cmPerPx + ORIGIN_OFFSET_X),
+      y: Math.round(rm.cyPx * cmPerPx + ORIGIN_OFFSET_Y),
+    };
+  });
+
   // Visual morphological mask preview
   const previewCanvas = document.createElement('canvas');
   previewCanvas.width = w;
@@ -1284,6 +1357,7 @@ export function parseFloorplanImage(
     doors,
     windows,
     furniture: [],
+    roomLabels,
     maskPreviewDataUrl: previewCanvas.toDataURL('image/png'),
     computedThreshold,
     originOffset: { x: ORIGIN_OFFSET_X, y: ORIGIN_OFFSET_Y },
@@ -1504,6 +1578,11 @@ export function rescaleFloorplanState(
       ...m,
       start: { x: scaleX(m.start.x), y: scaleY(m.start.y) },
       end: { x: scaleX(m.end.x), y: scaleY(m.end.y) },
+    })),
+    roomLabels: (state.roomLabels || []).map((r) => ({
+      ...r,
+      x: scaleX(r.x),
+      y: scaleY(r.y),
     })),
     background: state.background
       ? {

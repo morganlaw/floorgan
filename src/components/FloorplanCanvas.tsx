@@ -29,6 +29,8 @@ interface Props {
   setZoom: React.Dispatch<React.SetStateAction<number>>;
   pan: Point;
   setPan: React.Dispatch<React.SetStateAction<Point>>;
+  onStartInteraction?: () => void;
+  onEndInteraction?: () => void;
 }
 
 export const FloorplanCanvas: React.FC<Props> = ({
@@ -44,6 +46,8 @@ export const FloorplanCanvas: React.FC<Props> = ({
   setZoom,
   pan,
   setPan,
+  onStartInteraction,
+  onEndInteraction,
 }) => {
   const svgRef = useRef<SVGSVGElement | null>(null);
 
@@ -482,6 +486,9 @@ export const FloorplanCanvas: React.FC<Props> = ({
 
   // Pointer up
   const handlePointerUp = () => {
+    if (isDragging || resizeTarget || isRotating) {
+      onEndInteraction?.();
+    }
     setIsPanning(false);
     setIsDragging(false);
     setIsRotating(false);
@@ -567,6 +574,16 @@ export const FloorplanCanvas: React.FC<Props> = ({
     setPendingCalibDistCm(null);
     setTool('select');
   };
+
+  // Global pointer up listener to reliably release drag, resize, rotate, or pan
+  useEffect(() => {
+    if (!isDragging && !resizeTarget && !isRotating && !isPanning) return;
+    const onWindowPointerUp = () => {
+      handlePointerUp();
+    };
+    window.addEventListener('pointerup', onWindowPointerUp);
+    return () => window.removeEventListener('pointerup', onWindowPointerUp);
+  }, [isDragging, resizeTarget, isRotating, isPanning]);
 
   // Keyboard shortcuts (Escape, Backspace, Delete)
   useEffect(() => {
@@ -684,6 +701,54 @@ export const FloorplanCanvas: React.FC<Props> = ({
           <text x="8" y="-8" fontSize="11" fill="#94a3b8" fontFamily="sans-serif">
             (0, 0)
           </text>
+
+          {/* Imported Room Name & Dimension Labels */}
+          {(state.roomLabels || []).map((room) => (
+            <g
+              key={room.id}
+              transform={`translate(${room.x}, ${room.y})`}
+              style={{ pointerEvents: 'none', userSelect: 'none' }}
+            >
+              <rect
+                x="-68"
+                y={room.dimensionsText ? '-20' : '-13'}
+                width="136"
+                height={room.dimensionsText ? '40' : '26'}
+                rx="6"
+                fill="#ffffff"
+                fillOpacity="0.82"
+                stroke="#cbd5e1"
+                strokeWidth="1"
+              />
+              <text
+                x="0"
+                y={room.dimensionsText ? '-5' : '0'}
+                textAnchor="middle"
+                dominantBaseline="central"
+                fontSize="11"
+                fontWeight="700"
+                fill="#334155"
+                fontFamily="system-ui, sans-serif"
+                letterSpacing="0.04em"
+              >
+                {room.name.toUpperCase()}
+              </text>
+              {room.dimensionsText && (
+                <text
+                  x="0"
+                  y="10"
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  fontSize="10"
+                  fontWeight="600"
+                  fill="#64748b"
+                  fontFamily="monospace"
+                >
+                  {room.dimensionsText}
+                </text>
+              )}
+            </g>
+          ))}
 
           {/* Placed Walls */}
           {state.walls.map((wall) => {
@@ -885,6 +950,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
                     setSelectedId(door.id);
                     setSelectedType('door');
                     setIsDragging(true);
+                    onStartInteraction?.();
                     const worldPoint = screenToWorld(e.clientX, e.clientY);
                     setDragOffset({ x: worldPoint.x - door.x, y: worldPoint.y - door.y });
                   }
@@ -973,6 +1039,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
                     setSelectedId(win.id);
                     setSelectedType('window');
                     setIsDragging(true);
+                    onStartInteraction?.();
                     const worldPoint = screenToWorld(e.clientX, e.clientY);
                     setDragOffset({ x: worldPoint.x - win.x, y: worldPoint.y - win.y });
                   }
@@ -1034,6 +1101,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
                     setSelectedId(item.id);
                     setSelectedType('furniture');
                     setIsDragging(true);
+                    onStartInteraction?.();
                     const worldPoint = screenToWorld(e.clientX, e.clientY);
                     setDragOffset({ x: worldPoint.x - item.x, y: worldPoint.y - item.y });
                   }
@@ -1427,6 +1495,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
                 className="cursor-ew-resize"
                 onPointerDown={(e) => {
                   e.stopPropagation();
+                  onStartInteraction?.();
                   setResizeTarget({ id: selectedDoor.id, type: 'door', handle: 'left' });
                 }}
               />
@@ -1443,6 +1512,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
                 className="cursor-ew-resize"
                 onPointerDown={(e) => {
                   e.stopPropagation();
+                  onStartInteraction?.();
                   setResizeTarget({ id: selectedDoor.id, type: 'door', handle: 'right' });
                 }}
               />
@@ -1470,6 +1540,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
                 className="cursor-grab active:cursor-grabbing"
                 onPointerDown={(e) => {
                   e.stopPropagation();
+                  onStartInteraction?.();
                   setIsRotating(true);
                 }}
               />
@@ -1505,6 +1576,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
                 className="cursor-ew-resize"
                 onPointerDown={(e) => {
                   e.stopPropagation();
+                  onStartInteraction?.();
                   setResizeTarget({ id: selectedWindow.id, type: 'window', handle: 'left' });
                 }}
               />
@@ -1521,6 +1593,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
                 className="cursor-ew-resize"
                 onPointerDown={(e) => {
                   e.stopPropagation();
+                  onStartInteraction?.();
                   setResizeTarget({ id: selectedWindow.id, type: 'window', handle: 'right' });
                 }}
               />
@@ -1555,6 +1628,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
                 className="cursor-grab active:cursor-grabbing"
                 onPointerDown={(e) => {
                   e.stopPropagation();
+                  onStartInteraction?.();
                   setIsRotating(true);
                 }}
               />
@@ -1591,6 +1665,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
                 className="cursor-ew-resize"
                 onPointerDown={(e) => {
                   e.stopPropagation();
+                  onStartInteraction?.();
                   setResizeTarget({ id: selectedFurniture.id, type: 'furniture', handle: 'left' });
                 }}
               />
@@ -1607,6 +1682,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
                 className="cursor-ew-resize"
                 onPointerDown={(e) => {
                   e.stopPropagation();
+                  onStartInteraction?.();
                   setResizeTarget({ id: selectedFurniture.id, type: 'furniture', handle: 'right' });
                 }}
               />
@@ -1623,6 +1699,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
                 className="cursor-ns-resize"
                 onPointerDown={(e) => {
                   e.stopPropagation();
+                  onStartInteraction?.();
                   setResizeTarget({ id: selectedFurniture.id, type: 'furniture', handle: 'bottom' });
                 }}
               />
@@ -1671,6 +1748,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
                 className="cursor-grab active:cursor-grabbing"
                 onPointerDown={(e) => {
                   e.stopPropagation();
+                  onStartInteraction?.();
                   setIsRotating(true);
                 }}
               />

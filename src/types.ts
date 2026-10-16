@@ -32,9 +32,30 @@ export interface WindowItem {
   wallId?: string;
 }
 
-export type FurnitureCategory = 'beds' | 'tables' | 'seating' | 'desks';
+export type FurnitureCategory = 'beds' | 'tables' | 'seating' | 'custom';
 
-export interface FurnitureCatalogItem {
+/** Basic parametric shapes plus 'polygon' for freeform shapes drawn in the advanced editor */
+export type CustomShapeKind =
+  | 'rect'
+  | 'rounded_rect'
+  | 'ellipse'
+  | 'triangle'
+  | 'right_triangle'
+  | 'l_shape'
+  | 'u_shape'
+  | 'pentagon'
+  | 'hexagon'
+  | 'octagon'
+  | 'polygon';
+
+/** Optional geometry for custom-created objects */
+export interface CustomShapeData {
+  shape?: CustomShapeKind;
+  /** Normalized vertices in [-0.5, 0.5] (scaled by width/depth). Used when shape === 'polygon'. */
+  points?: Point[];
+}
+
+export interface FurnitureCatalogItem extends CustomShapeData {
   catalogId: string;
   name: string;
   category: FurnitureCategory;
@@ -45,7 +66,7 @@ export interface FurnitureCatalogItem {
   description: string;
 }
 
-export interface PlacedFurniture {
+export interface PlacedFurniture extends CustomShapeData {
   id: string;
   catalogId: string;
   name: string;
@@ -63,6 +84,14 @@ export interface Measurement {
   id: string;
   start: Point;
   end: Point;
+}
+
+export interface RoomLabel {
+  id: string;
+  name: string;
+  dimensionsText?: string;
+  x: number; // center x in cm
+  y: number; // center y in cm
 }
 
 export interface BackgroundLayer {
@@ -91,6 +120,7 @@ export interface FloorplanState {
   windows: WindowItem[];
   furniture: PlacedFurniture[];
   measurements: Measurement[];
+  roomLabels?: RoomLabel[];
   unit: Unit;
   gridSnap: boolean;
   gridSize: number; // in cm (e.g. 20cm or 50cm)
