@@ -237,7 +237,7 @@ export const App: React.FC = () => {
                 </div>
                 <div className="shortcut-item">
                   <kbd>V</kbd>
-                  <span>Select & Move Tool</span>
+                  <span>Select & Move Tool (Drag box to multi-select)</span>
                 </div>
                 <div className="shortcut-item">
                   <kbd>W</kbd>
@@ -256,8 +256,8 @@ export const App: React.FC = () => {
                   <span>Measuring Tape Tool</span>
                 </div>
                 <div className="shortcut-item">
-                  <kbd>Shift</kbd>
-                  <span>Snap walls & rotation to 45° / 90° angles</span>
+                  <kbd>Shift</kbd> + Drag / Click
+                  <span>Multi-select elements, or snap walls/rotation to 45°/90°</span>
                 </div>
                 <div className="shortcut-item">
                   <kbd>Space</kbd> + Drag

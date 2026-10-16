@@ -98,7 +98,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
 
   // Multi-item dragging support
   const [dragStartPoint, setDragStartPoint] = useState<Point | null>(null);
-  const [dragInitialPositions, setDragInitialPositions] = useState<{ [id: string]: Point }>({});
+  const [dragInitialPositions, setDragInitialPositions] = useState<{ [id: string]: Point & { endX?: number; endY?: number } }>({});
 
   // Wall creation
   const [wallStart, setWallStart] = useState<Point | null>(null);
@@ -651,6 +651,18 @@ export const FloorplanCanvas: React.FC<Props> = ({
               ? { ...w, x: dragInitialPositions[w.id].x + dx, y: dragInitialPositions[w.id].y + dy }
               : w
           ),
+          walls: prev.walls.map((wl) =>
+            dragInitialPositions[wl.id]
+              ? {
+                  ...wl,
+                  start: { x: dragInitialPositions[wl.id].x + dx, y: dragInitialPositions[wl.id].y + dy },
+                  end: {
+                    x: (dragInitialPositions[wl.id].endX ?? wl.end.x) + dx,
+                    y: (dragInitialPositions[wl.id].endY ?? wl.end.y) + dy,
+                  },
+                }
+              : wl
+          ),
         }));
       } else if (selectedId) {
         if (selectedType === 'furniture') {
@@ -876,7 +888,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
   };
 
   // Pointer up
-  const handlePointerUp = () => {
+  const handlePointerUp = (e?: React.PointerEvent | PointerEvent) => {
     if (isDragging || resizeTarget || isRotating || selectionBox) {
       onEndInteraction?.();
     }
@@ -956,19 +968,30 @@ export const FloorplanCanvas: React.FC<Props> = ({
           }
         }
 
-        const ids = boxed.map((b) => b.id);
+        const boxedIds = boxed.map((b) => b.id);
+        const isShift = Boolean(e && e.shiftKey);
+        let ids: string[];
+        if (isShift) {
+          ids = Array.from(new Set([...selectedIds, ...boxedIds]));
+        } else {
+          ids = boxedIds;
+        }
+
         if (ids.length === 1) {
-          setSelectedId(boxed[0].id);
-          setSelectedType(boxed[0].type);
-          setSelectedIds?.([boxed[0].id]);
+          const singleItem = boxed.find((b) => b.id === ids[0]);
+          setSelectedId(ids[0]);
+          setSelectedType(singleItem ? singleItem.type : 'furniture');
+          setSelectedIds?.(ids);
         } else if (ids.length > 1) {
-          setSelectedId(boxed[0].id);
+          setSelectedId(ids[0]);
           setSelectedType('multiple');
           setSelectedIds?.(ids);
         } else {
-          setSelectedId(null);
-          setSelectedType(null);
-          setSelectedIds?.([]);
+          if (!isShift) {
+            setSelectedId(null);
+            setSelectedType(null);
+            setSelectedIds?.([]);
+          }
         }
       }
       setSelectionBox(null);
@@ -1174,11 +1197,12 @@ export const FloorplanCanvas: React.FC<Props> = ({
     setIsDragging(true);
     onStartInteraction?.();
     if (activeIds.length > 1) {
-      const initPos: { [id: string]: Point } = {};
+      const initPos: { [id: string]: Point & { endX?: number; endY?: number } } = {};
       for (const f of state.furniture) if (activeIds.includes(f.id)) initPos[f.id] = { x: f.x, y: f.y };
       for (const t of state.textBoxes || []) if (activeIds.includes(t.id)) initPos[t.id] = { x: t.x, y: t.y };
       for (const d of state.doors) if (activeIds.includes(d.id)) initPos[d.id] = { x: d.x, y: d.y };
       for (const w of state.windows) if (activeIds.includes(w.id)) initPos[w.id] = { x: w.x, y: w.y };
+      for (const wl of state.walls) if (activeIds.includes(wl.id)) initPos[wl.id] = { x: wl.start.x, y: wl.start.y, endX: wl.end.x, endY: wl.end.y };
       setDragInitialPositions(initPos);
       setDragStartPoint(worldPoint);
     } else {
@@ -1588,7 +1612,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
 
           {/* Windows */}
           {state.windows.map((win) => {
-            const isSelected = selectedId === win.id;
+            const isSelected = selectedId === win.id || selectedIds.includes(win.id);
             const halfW = win.width / 2;
             const halfT = win.thickness / 2;
 
@@ -1598,18 +1622,17 @@ export const FloorplanCanvas: React.FC<Props> = ({
                 transform={`translate(${win.x}, ${win.y}) rotate(${win.rotation})`}
                 onClick={(e) => {
                   e.stopPropagation();
-                  setSelectedId(win.id);
-                  setSelectedType('window');
+                  toggleOrSelectItem(win.id, 'window', e.shiftKey);
                 }}
                 onPointerDown={(e) => {
                   if (tool === 'select') {
                     e.stopPropagation();
-                    setSelectedId(win.id);
-                    setSelectedType('window');
-                    setIsDragging(true);
-                    onStartInteraction?.();
+                    if (e.shiftKey) {
+                      toggleOrSelectItem(win.id, 'window', true);
+                      return;
+                    }
                     const worldPoint = screenToWorld(e.clientX, e.clientY);
-                    setDragOffset({ x: worldPoint.x - win.x, y: worldPoint.y - win.y });
+                    startDragForIds(win.id, 'window', worldPoint, { x: win.x, y: win.y });
                   }
                 }}
                 className="cursor-move"
@@ -1650,7 +1673,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
 
           {/* Furniture items */}
           {state.furniture.map((item) => {
-            const isSelected = selectedId === item.id;
+            const isSelected = selectedId === item.id || selectedIds.includes(item.id);
             const halfW = item.width / 2;
             const halfD = item.depth / 2;
 
@@ -1660,18 +1683,17 @@ export const FloorplanCanvas: React.FC<Props> = ({
                 transform={`translate(${item.x}, ${item.y}) rotate(${item.rotation})`}
                 onClick={(e) => {
                   e.stopPropagation();
-                  setSelectedId(item.id);
-                  setSelectedType('furniture');
+                  toggleOrSelectItem(item.id, 'furniture', e.shiftKey);
                 }}
                 onPointerDown={(e) => {
                   if (tool === 'select') {
                     e.stopPropagation();
-                    setSelectedId(item.id);
-                    setSelectedType('furniture');
-                    setIsDragging(true);
-                    onStartInteraction?.();
+                    if (e.shiftKey) {
+                      toggleOrSelectItem(item.id, 'furniture', true);
+                      return;
+                    }
                     const worldPoint = screenToWorld(e.clientX, e.clientY);
-                    setDragOffset({ x: worldPoint.x - item.x, y: worldPoint.y - item.y });
+                    startDragForIds(item.id, 'furniture', worldPoint, { x: item.x, y: item.y });
                   }
                 }}
                 className="cursor-move"
@@ -2048,7 +2070,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
 
           {/* Custom Text Boxes */}
           {(state.textBoxes || []).map((item) => {
-            const isSelected = selectedId === item.id;
+            const isSelected = selectedId === item.id || selectedIds.includes(item.id);
             const halfW = item.width / 2;
             const halfH = item.height / 2;
             const fontSize = item.fontSize || 16;
@@ -2063,18 +2085,17 @@ export const FloorplanCanvas: React.FC<Props> = ({
                 transform={`translate(${item.x}, ${item.y}) rotate(${item.rotation})`}
                 onClick={(e) => {
                   e.stopPropagation();
-                  setSelectedId(item.id);
-                  setSelectedType('textbox');
+                  toggleOrSelectItem(item.id, 'textbox', e.shiftKey);
                 }}
                 onPointerDown={(e) => {
                   if (tool === 'select') {
                     e.stopPropagation();
-                    setSelectedId(item.id);
-                    setSelectedType('textbox');
-                    setIsDragging(true);
-                    onStartInteraction?.();
+                    if (e.shiftKey) {
+                      toggleOrSelectItem(item.id, 'textbox', true);
+                      return;
+                    }
                     const worldPoint = screenToWorld(e.clientX, e.clientY);
-                    setDragOffset({ x: worldPoint.x - item.x, y: worldPoint.y - item.y });
+                    startDragForIds(item.id, 'textbox', worldPoint, { x: item.x, y: item.y });
                   }
                 }}
                 className="cursor-move"
@@ -2138,7 +2159,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
           })}
 
           {/* Selection Box, Endpoint Resize Handles & 360 Rotation for Selected Wall */}
-          {selectedWall && (() => {
+          {selectedIds.length <= 1 && selectedWall && (() => {
             const midX = (selectedWall.start.x + selectedWall.end.x) / 2;
             const midY = (selectedWall.start.y + selectedWall.end.y) / 2;
             const wallLength = distance(selectedWall.start, selectedWall.end);
@@ -2248,7 +2269,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
           })()}
 
           {/* Selection Box, Edge Resizing & 360 Rotation for Selected Door */}
-          {selectedDoor && (
+          {selectedIds.length <= 1 && selectedDoor && (
             <g
               transform={`translate(${selectedDoor.x}, ${selectedDoor.y}) rotate(${selectedDoor.rotation})`}
             >
@@ -2329,7 +2350,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
           )}
 
           {/* Selection Box, Edge Resizing & 360 Rotation for Selected Window */}
-          {selectedWindow && (
+          {selectedIds.length <= 1 && selectedWindow && (
             <g
               transform={`translate(${selectedWindow.x}, ${selectedWindow.y}) rotate(${selectedWindow.rotation})`}
             >
@@ -2417,7 +2438,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
           )}
 
           {/* Selection Box, Edge Resizing & Rotation Handle for Selected Furniture */}
-          {selectedFurniture && (
+          {selectedIds.length <= 1 && selectedFurniture && (
             <g
               transform={`translate(${selectedFurniture.x}, ${selectedFurniture.y}) rotate(${selectedFurniture.rotation})`}
             >
@@ -2537,7 +2558,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
           )}
 
           {/* Selection Box, 8-Point Edge & Corner Resizing & 360 Rotation for Selected Text Box */}
-          {selectedTextBox && (() => {
+          {selectedIds.length <= 1 && selectedTextBox && (() => {
             const halfW = selectedTextBox.width / 2;
             const halfH = selectedTextBox.height / 2;
             return (
@@ -2777,7 +2798,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
 
           {/* Placed Persistent Measurements */}
           {state.measurements.map((m) => {
-            const isSelected = selectedId === m.id;
+            const isSelected = selectedId === m.id || selectedIds.includes(m.id);
             const dist = distance(m.start, m.end);
             const midX = (m.start.x + m.end.x) / 2;
             const midY = (m.start.y + m.end.y) / 2;
@@ -2787,8 +2808,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
                 key={m.id}
                 onClick={(e) => {
                   e.stopPropagation();
-                  setSelectedId(m.id);
-                  setSelectedType('measurement');
+                  toggleOrSelectItem(m.id, 'measurement', e.shiftKey);
                 }}
                 className="cursor-pointer"
               >
@@ -2936,6 +2956,22 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   Calibrate: {formatDimension(distance(calibStart, calibEnd), state.unit)}
                 </text>
               </g>
+            </g>
+          )}
+
+          {/* Interactive Selection Marquee Box */}
+          {selectionBox && (
+            <g className="selection-marquee" style={{ pointerEvents: 'none' }}>
+              <rect
+                x={Math.min(selectionBox.start.x, selectionBox.current.x)}
+                y={Math.min(selectionBox.start.y, selectionBox.current.y)}
+                width={Math.abs(selectionBox.current.x - selectionBox.start.x)}
+                height={Math.abs(selectionBox.current.y - selectionBox.start.y)}
+                fill="rgba(37, 99, 235, 0.12)"
+                stroke="#2563eb"
+                strokeWidth="1.5"
+                strokeDasharray="5 3"
+              />
             </g>
           )}
         </g>

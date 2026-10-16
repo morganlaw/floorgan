@@ -15,6 +15,8 @@ import {
   Bold,
   Italic,
   Type,
+  X,
+  Layers,
 } from 'lucide-react';
 import { CustomShapeKind, FloorplanState, PlacedFurniture, SelectedElementType, TextBoxItem, ToolMode } from '../types';
 import { formatDimension, distance } from '../utils/geometry';
@@ -37,8 +39,8 @@ export const PropertiesPanel: React.FC<Props> = ({
   setState,
   selectedId,
   setSelectedId,
-  selectedIds: _selectedIds = [],
-  setSelectedIds: _setSelectedIds,
+  selectedIds = [],
+  setSelectedIds,
   selectedType,
   setSelectedType,
   setTool,
@@ -49,6 +51,14 @@ export const PropertiesPanel: React.FC<Props> = ({
   const selectedWindow = state.windows.find((w) => w.id === selectedId);
   const selectedMeasurement = state.measurements.find((m) => m.id === selectedId);
   const selectedTextBox = (state.textBoxes || []).find((t) => t.id === selectedId);
+
+  const isMultiSelect = selectedIds.length > 1;
+  const selectedFurnitureCount = state.furniture.filter((f) => selectedIds.includes(f.id)).length;
+  const selectedWallsCount = state.walls.filter((w) => selectedIds.includes(w.id)).length;
+  const selectedDoorsCount = state.doors.filter((d) => selectedIds.includes(d.id)).length;
+  const selectedWindowsCount = state.windows.filter((w) => selectedIds.includes(w.id)).length;
+  const selectedTextBoxesCount = (state.textBoxes || []).filter((t) => selectedIds.includes(t.id)).length;
+  const selectedMeasurementsCount = state.measurements.filter((m) => selectedIds.includes(m.id)).length;
 
   const colors = [
     '#334155', // Slate
@@ -137,6 +147,7 @@ export const PropertiesPanel: React.FC<Props> = ({
       };
       setState((prev) => ({ ...prev, furniture: [...prev.furniture, copy] }));
       setSelectedId(copy.id);
+      setSelectedIds?.([copy.id]);
     } else if (selectedTextBox) {
       const copy: TextBoxItem = {
         ...selectedTextBox,
@@ -146,6 +157,7 @@ export const PropertiesPanel: React.FC<Props> = ({
       };
       setState((prev) => ({ ...prev, textBoxes: [...(prev.textBoxes || []), copy] }));
       setSelectedId(copy.id);
+      setSelectedIds?.([copy.id]);
     } else if (selectedWall) {
       const copy = {
         ...selectedWall,
@@ -155,7 +167,137 @@ export const PropertiesPanel: React.FC<Props> = ({
       };
       setState((prev) => ({ ...prev, walls: [...prev.walls, copy] }));
       setSelectedId(copy.id);
+      setSelectedIds?.([copy.id]);
     }
+  };
+
+  const handleBatchDuplicate = () => {
+    if (selectedIds.length <= 1) return;
+    const newSelectedIds: string[] = [];
+
+    setState((prev) => {
+      const nextFurniture = [...prev.furniture];
+      const nextTextBoxes = [...(prev.textBoxes || [])];
+      const nextWalls = [...prev.walls];
+      const nextDoors = [...prev.doors];
+      const nextWindows = [...prev.windows];
+      const nextMeasurements = [...prev.measurements];
+
+      // Duplicate furniture
+      prev.furniture.forEach((f, idx) => {
+        if (selectedIds.includes(f.id)) {
+          const newId = `furn_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 6)}`;
+          newSelectedIds.push(newId);
+          nextFurniture.push({
+            ...f,
+            id: newId,
+            x: f.x + 20,
+            y: f.y + 20,
+          });
+        }
+      });
+
+      // Duplicate text boxes
+      (prev.textBoxes || []).forEach((t, idx) => {
+        if (selectedIds.includes(t.id)) {
+          const newId = `text_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 6)}`;
+          newSelectedIds.push(newId);
+          nextTextBoxes.push({
+            ...t,
+            id: newId,
+            x: t.x + 20,
+            y: t.y + 20,
+          });
+        }
+      });
+
+      // Duplicate walls
+      prev.walls.forEach((w, idx) => {
+        if (selectedIds.includes(w.id)) {
+          const newId = `wall_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 6)}`;
+          newSelectedIds.push(newId);
+          nextWalls.push({
+            ...w,
+            id: newId,
+            start: { x: w.start.x + 20, y: w.start.y + 20 },
+            end: { x: w.end.x + 20, y: w.end.y + 20 },
+          });
+        }
+      });
+
+      // Duplicate doors
+      prev.doors.forEach((d, idx) => {
+        if (selectedIds.includes(d.id)) {
+          const newId = `door_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 6)}`;
+          newSelectedIds.push(newId);
+          nextDoors.push({
+            ...d,
+            id: newId,
+            x: d.x + 20,
+            y: d.y + 20,
+          });
+        }
+      });
+
+      // Duplicate windows
+      prev.windows.forEach((win, idx) => {
+        if (selectedIds.includes(win.id)) {
+          const newId = `win_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 6)}`;
+          newSelectedIds.push(newId);
+          nextWindows.push({
+            ...win,
+            id: newId,
+            x: win.x + 20,
+            y: win.y + 20,
+          });
+        }
+      });
+
+      // Duplicate measurements
+      prev.measurements.forEach((m, idx) => {
+        if (selectedIds.includes(m.id)) {
+          const newId = `meas_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 6)}`;
+          newSelectedIds.push(newId);
+          nextMeasurements.push({
+            ...m,
+            id: newId,
+            start: { x: m.start.x + 20, y: m.start.y + 20 },
+            end: { x: m.end.x + 20, y: m.end.y + 20 },
+          });
+        }
+      });
+
+      return {
+        ...prev,
+        furniture: nextFurniture,
+        textBoxes: nextTextBoxes,
+        walls: nextWalls,
+        doors: nextDoors,
+        windows: nextWindows,
+        measurements: nextMeasurements,
+      };
+    });
+
+    if (newSelectedIds.length > 0) {
+      setSelectedIds?.(newSelectedIds);
+      setSelectedId(newSelectedIds[0]);
+      setSelectedType('multiple');
+    }
+  };
+
+  const handleBatchDelete = () => {
+    setState((prev) => ({
+      ...prev,
+      furniture: prev.furniture.filter((f) => !selectedIds.includes(f.id)),
+      textBoxes: (prev.textBoxes || []).filter((t) => !selectedIds.includes(t.id)),
+      walls: prev.walls.filter((w) => !selectedIds.includes(w.id)),
+      doors: prev.doors.filter((d) => !selectedIds.includes(d.id)),
+      windows: prev.windows.filter((w) => !selectedIds.includes(w.id)),
+      measurements: prev.measurements.filter((m) => !selectedIds.includes(m.id)),
+    }));
+    setSelectedId(null);
+    setSelectedType(null);
+    setSelectedIds?.([]);
   };
 
   const handleDelete = () => {
@@ -193,6 +335,7 @@ export const PropertiesPanel: React.FC<Props> = ({
     }
     setSelectedId(null);
     setSelectedType(null);
+    setSelectedIds?.([]);
   };
 
   const handleReorder = (direction: 'front' | 'back') => {
@@ -231,8 +374,102 @@ export const PropertiesPanel: React.FC<Props> = ({
         <h3 className="panel-title">Inspector</h3>
       </div>
 
+      {/* Multi-Selection Inspector */}
+      {isMultiSelect && (
+        <div className="inspector-content">
+          <div className="info-card">
+            <div className="flex justify-between items-center mb-1">
+              <span className="info-title">Multiple Items Selected</span>
+              <span className="custom-tag flex items-center gap-1">
+                <Layers size={11} />
+                <span>Multi-Select</span>
+              </span>
+            </div>
+            <span className="info-value font-mono">
+              {selectedIds.length} items selected
+            </span>
+          </div>
+
+          <div className="field-group">
+            <label className="field-label">Selected Elements</label>
+            <div className="stats-box">
+              {selectedFurnitureCount > 0 && (
+                <div className="stats-row">
+                  <span>Furniture:</span>
+                  <span className="font-mono font-semibold">{selectedFurnitureCount}</span>
+                </div>
+              )}
+              {selectedWallsCount > 0 && (
+                <div className="stats-row">
+                  <span>Wall Segments:</span>
+                  <span className="font-mono font-semibold">{selectedWallsCount}</span>
+                </div>
+              )}
+              {selectedDoorsCount > 0 && (
+                <div className="stats-row">
+                  <span>Doors:</span>
+                  <span className="font-mono font-semibold">{selectedDoorsCount}</span>
+                </div>
+              )}
+              {selectedWindowsCount > 0 && (
+                <div className="stats-row">
+                  <span>Windows:</span>
+                  <span className="font-mono font-semibold">{selectedWindowsCount}</span>
+                </div>
+              )}
+              {selectedTextBoxesCount > 0 && (
+                <div className="stats-row">
+                  <span>Text Boxes:</span>
+                  <span className="font-mono font-semibold">{selectedTextBoxesCount}</span>
+                </div>
+              )}
+              {selectedMeasurementsCount > 0 && (
+                <div className="stats-row">
+                  <span>Measurements:</span>
+                  <span className="font-mono font-semibold">{selectedMeasurementsCount}</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="divider" />
+
+          {/* Batch Actions */}
+          <div className="flex flex-col gap-2">
+            <button
+              className="btn-secondary w-full"
+              onClick={handleBatchDuplicate}
+              title="Duplicate all selected items"
+            >
+              <Copy size={15} />
+              <span>Duplicate Selected ({selectedIds.length})</span>
+            </button>
+            <button
+              className="btn-danger w-full"
+              onClick={handleBatchDelete}
+              title="Delete all selected items"
+            >
+              <Trash2 size={15} />
+              <span>Delete Selected ({selectedIds.length})</span>
+            </button>
+            <button
+              className="btn-secondary w-full"
+              onClick={() => {
+                setSelectedId(null);
+                setSelectedType(null);
+                setSelectedIds?.([]);
+              }}
+              title="Deselect all items"
+            >
+              <X size={15} />
+              <span>Deselect All</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Selected Furniture Inspector */}
-      {selectedFurniture && (
+      {!isMultiSelect && selectedFurniture && (
         <div className="inspector-content">
           <div className="field-group">
             <label className="field-label">Name</label>
@@ -396,7 +633,7 @@ export const PropertiesPanel: React.FC<Props> = ({
       )}
 
       {/* Selected Text Box Inspector */}
-      {selectedTextBox && (
+      {!isMultiSelect && selectedTextBox && (
         <div className="inspector-content">
           <div className="field-group">
             <div className="flex justify-between items-center mb-1">
@@ -703,7 +940,7 @@ export const PropertiesPanel: React.FC<Props> = ({
       )}
 
       {/* Selected Wall Inspector */}
-      {selectedWall && (() => {
+      {!isMultiSelect && selectedWall && (() => {
         const wallLen = distance(selectedWall.start, selectedWall.end);
         const angleRad = Math.atan2(
           selectedWall.end.y - selectedWall.start.y,
@@ -847,7 +1084,7 @@ export const PropertiesPanel: React.FC<Props> = ({
       })()}
 
       {/* Selected Door Inspector */}
-      {selectedDoor && (
+      {!isMultiSelect && selectedDoor && (
         <div className="inspector-content">
           <div className="info-card">
             <span className="info-title">Door Fixture</span>
@@ -944,7 +1181,7 @@ export const PropertiesPanel: React.FC<Props> = ({
       )}
 
       {/* Selected Window Inspector */}
-      {selectedWindow && (
+      {!isMultiSelect && selectedWindow && (
         <div className="inspector-content">
           <div className="info-card">
             <span className="info-title">Window Element</span>
@@ -1009,7 +1246,7 @@ export const PropertiesPanel: React.FC<Props> = ({
       )}
 
       {/* Selected Measurement Inspector */}
-      {selectedMeasurement && (
+      {!isMultiSelect && selectedMeasurement && (
         <div className="inspector-content">
           <div className="info-card">
             <span className="info-title">Measurement Dimension</span>
@@ -1036,7 +1273,7 @@ export const PropertiesPanel: React.FC<Props> = ({
       )}
 
       {/* Empty State */}
-      {!selectedId && (
+      {!isMultiSelect && !selectedId && (
         <div className="inspector-empty">
           <Info size={28} className="text-slate-400 mb-2" />
           <h4 className="text-sm font-semibold text-slate-700">No Item Selected</h4>
