@@ -116,7 +116,7 @@ export const App: React.FC = () => {
         isOpen={showImportModal}
         onClose={() => setShowImportModal(false)}
         state={state}
-        onImport={(newState) => {
+        onImport={(newState: FloorplanState) => {
           setState(newState);
           setSelectedId(null);
           setSelectedType(null);
