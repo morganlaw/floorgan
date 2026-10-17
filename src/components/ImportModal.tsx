@@ -204,8 +204,9 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport 
       doors: parseResult.doors,
       windows: parseResult.windows,
       furniture: keepExistingFurniture ? state.furniture : [],
+      textBoxes: keepExistingFurniture ? state.textBoxes : [],
       measurements: [],
-      roomLabels: parseResult.roomLabels,
+      roomLabels: [],
       background: includeUnderlay
         ? {
             dataUrl: imageDataUrl,
@@ -222,11 +223,6 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport 
     onImport(newState);
     onClose();
   };
-
-  const effectiveWidthMeters =
-    useOcrScale && parseResult?.autoCalibratedWidthMeters
-      ? parseResult.autoCalibratedWidthMeters
-      : options.targetWidthMeters;
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -360,13 +356,13 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport 
               </div>
             )}
 
-            {/* OCR Dimension & Room Name Auto-Calibration Status Box */}
+            {/* OCR Dimension Auto-Calibration Status Box */}
             {imageDataUrl && (
               <div className="ocr-status-box">
                 <div className="flex justify-between items-center">
                   <div className="flex items-center gap-2">
                     <Ruler size={14} className="text-blue-600" />
-                    <span className="field-label">Photo Room & Dimension Reader (OCR)</span>
+                    <span className="field-label">Photo Dimension Scale Calibration (OCR)</span>
                   </div>
                   {isScanningOcr && (
                     <span className="text-xs text-slate-500 flex items-center gap-1">
@@ -377,16 +373,9 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport 
 
                 {!isScanningOcr &&
                 parseResult &&
-                (parseResult.detectedDimensions.length > 0 ||
-                  parseResult.roomLabels.length > 0) ? (
+                parseResult.detectedDimensions.length > 0 ? (
                   <>
                     <div className="ocr-chips">
-                      {parseResult.roomLabels.map((r) => (
-                        <span key={r.id} className="ocr-chip">
-                          {r.name}
-                          {r.dimensionsText ? ` (${r.dimensionsText})` : ''}
-                        </span>
-                      ))}
                       {parseResult.detectedDimensions.map((d, i) => (
                         <span
                           key={i}
@@ -418,7 +407,7 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport 
                 ) : (
                   !isScanningOcr && (
                     <span className="text-xs text-slate-500">
-                      No printed dimensions detected in photo — using manual width slider below.
+                      No printed dimensions detected in photo — using default scale.
                     </span>
                   )
                 )}
@@ -510,35 +499,6 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport 
                       minWallLengthCm: Number(e.target.value),
                     }))
                   }
-                  className="slider-range"
-                />
-              </div>
-
-              {/* Floorplan Width Scale (auto-overridden when OCR scale is active) */}
-              <div className="field-group">
-                <div className="flex justify-between items-center">
-                  <label className="field-label">
-                    Floorplan Width ({state.unit === 'm' ? 'Meters' : 'Feet'})
-                  </label>
-                  <span className="text-xs font-mono font-bold text-blue-600">
-                    {state.unit === 'm'
-                      ? `${effectiveWidthMeters.toFixed(2)} m`
-                      : `${(effectiveWidthMeters * 3.28084).toFixed(1)} ft`}
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min="4"
-                  max="25"
-                  step="0.25"
-                  value={effectiveWidthMeters}
-                  onChange={(e) => {
-                    setUseOcrScale(false);
-                    setOptions((prev) => ({
-                      ...prev,
-                      targetWidthMeters: Number(e.target.value),
-                    }));
-                  }}
                   className="slider-range"
                 />
               </div>
@@ -716,33 +676,6 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport 
                         stroke="#0284c7"
                         strokeWidth={3}
                       />
-                    </g>
-                  ))}
-
-                  {/* Matched OCR Room Dimension Badges */}
-                  {parseResult.detectedDimensions.map((dim, idx) => (
-                    <g key={idx} transform={`translate(${dim.xCm}, ${dim.yCm})`}>
-                      <rect
-                        x={-48}
-                        y={-13}
-                        width={96}
-                        height={26}
-                        rx={5}
-                        fill="#059669"
-                        fillOpacity={0.92}
-                        stroke="#ffffff"
-                        strokeWidth={1.5}
-                      />
-                      <text
-                        textAnchor="middle"
-                        dominantBaseline="central"
-                        fontSize={11}
-                        fontWeight="bold"
-                        fill="#ffffff"
-                        fontFamily="monospace"
-                      >
-                        {dim.rawText}
-                      </text>
                     </g>
                   ))}
                 </svg>

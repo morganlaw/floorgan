@@ -1276,54 +1276,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
             (0, 0)
           </text>
 
-          {/* Imported Room Name & Dimension Labels */}
-          {(state.roomLabels || []).map((room) => (
-            <g
-              key={room.id}
-              transform={`translate(${room.x}, ${room.y})`}
-              style={{ pointerEvents: 'none', userSelect: 'none' }}
-            >
-              <rect
-                x="-68"
-                y={room.dimensionsText ? '-20' : '-13'}
-                width="136"
-                height={room.dimensionsText ? '40' : '26'}
-                rx="6"
-                fill="#ffffff"
-                fillOpacity="0.82"
-                stroke="#cbd5e1"
-                strokeWidth="1"
-              />
-              <text
-                x="0"
-                y={room.dimensionsText ? '-5' : '0'}
-                textAnchor="middle"
-                dominantBaseline="central"
-                fontSize="11"
-                fontWeight="700"
-                fill="#334155"
-                fontFamily="system-ui, sans-serif"
-                letterSpacing="0.04em"
-              >
-                {room.name.toUpperCase()}
-              </text>
-              {room.dimensionsText && (
-                <text
-                  x="0"
-                  y="10"
-                  textAnchor="middle"
-                  dominantBaseline="central"
-                  fontSize="10"
-                  fontWeight="600"
-                  fill="#64748b"
-                  fontFamily="monospace"
-                >
-                  {room.dimensionsText}
-                </text>
-              )}
-            </g>
-          ))}
-
           {/* Placed Walls */}
           {state.walls.map((wall) => {
             const isSelected = selectedId === wall.id || selectedIds.includes(wall.id);
