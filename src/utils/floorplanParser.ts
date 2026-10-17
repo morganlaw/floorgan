@@ -223,14 +223,44 @@ function filterConnectedComponents(
       const fillRatio = area / bboxArea;
       const aspectRatio = maxSpan / minSpan;
 
-      // 1. Any component smaller than minSpanPx (all letters, digits, stove rings) -> erase
-      // 2. Any compact hollow blob (like a compass rose or standalone toilet/sink/arrow)
-      //    that isn't part of the main room wall network -> erase
-      const isSmallIsland = maxSpan < minSpanPx || area < minSpanPx * 3;
-      const isCompactIconOrText =
-        maxSpan < Math.min(w, h) * 0.16 && aspectRatio < 3.2 && fillRatio < 0.48;
+      // Check if component contains at least one 4x4 solid structural wall core
+      let hasSolidCore = false;
+      if (maxSpan >= minSpanPx && minSpan >= 4) {
+        for (let i = 0; i < componentPixels.length; i += 2) {
+          const idx = componentPixels[i];
+          const cy = Math.floor(idx / w);
+          const cx = idx - cy * w;
+          if (cx + 3 >= w || cy + 3 >= h) continue;
+          let solid = true;
+          for (let dy = 0; dy <= 3 && solid; dy++) {
+            const r = (cy + dy) * w + cx;
+            if (!out[r] || !out[r + 1] || !out[r + 2] || !out[r + 3]) {
+              solid = false;
+            }
+          }
+          if (solid) {
+            hasSolidCore = true;
+            break;
+          }
+        }
+      }
 
-      if (isSmallIsland || isCompactIconOrText) {
+      // 1. Any component smaller than minSpanPx (all letters, digits, stove rings, entry arrows) -> erase
+      // 2. Any compact thin-line hollow blob (like a compass rose or standalone toilet/sink)
+      //    that lacks a solid structural wall core -> erase
+      // 3. Screenshot UI pill/bar touching the extreme top/bottom image border -> erase
+      const isSmallIsland = maxSpan < minSpanPx || area < minSpanPx * 2.5;
+      const isCompactIconOrText =
+        !hasSolidCore &&
+        maxSpan < Math.min(w, h) * 0.16 &&
+        aspectRatio < 3.2 &&
+        fillRatio < 0.48;
+      const isEdgeBanner =
+        (minY <= 1 || maxY >= h - 2) &&
+        bboxH <= Math.round(h * 0.05) &&
+        fillRatio > 0.62;
+
+      if (isSmallIsland || isCompactIconOrText || isEdgeBanner) {
         for (let i = 0; i < componentPixels.length; i++) {
           out[componentPixels[i]] = 0;
         }
@@ -289,7 +319,8 @@ function estimateStructuralWallThickness(mask: Uint8Array, w: number, h: number)
 }
 
 /**
- * 1D horizontal + vertical morphological closing to fill narrow hollow gaps inside double-line CAD walls.
+ * 1D horizontal + vertical morphological closing to fill narrow hollow gaps inside double-line CAD walls,
+ * while ignoring periodic multi-line comb patterns (closet shelf stripes, staircase treads, floor tile grids).
  */
 function closeDoubleLineGaps(
   mask: Uint8Array,
@@ -299,14 +330,49 @@ function closeDoubleLineGaps(
 ): Uint8Array {
   const out = new Uint8Array(mask);
 
-  for (let y = 0; y < h; y++) {
+  for (let y = 2; y < h - 2; y++) {
     const rowOffset = y * w;
     let lastOn = -1;
-    for (let x = 0; x < w; x++) {
+    for (let x = 2; x < w - 2; x++) {
       if (mask[rowOffset + x]) {
-        if (lastOn >= 0 && x - lastOn > 1 && x - lastOn <= maxGap) {
-          for (let fillX = lastOn + 1; fillX < x; fillX++) {
-            out[rowOffset + fillX] = 1;
+        const gap = x - lastOn - 1;
+        if (lastOn >= 2 && gap >= 1 && gap <= maxGap) {
+          // Verify outer neighborhood has no parallel 3rd line (window bands, shelves, stairs)
+          let outerRuns = 0;
+          let inRun = false;
+          for (let ox = Math.max(0, lastOn - 10); ox <= lastOn - 2; ox++) {
+            const on = mask[rowOffset + ox] === 1;
+            if (on && !inRun) {
+              outerRuns++;
+              inRun = true;
+            } else if (!on) {
+              inRun = false;
+            }
+          }
+          inRun = false;
+          for (let ox = x + 2; ox <= Math.min(w - 1, x + 10); ox++) {
+            const on = mask[rowOffset + ox] === 1;
+            if (on && !inRun) {
+              outerRuns++;
+              inRun = true;
+            } else if (!on) {
+              inRun = false;
+            }
+          }
+
+          if (outerRuns === 0) {
+            let parallelSupport = 0;
+            for (let dy = -2; dy <= 2; dy++) {
+              const r = (y + dy) * w;
+              const leftOk = mask[r + lastOn] || mask[r + lastOn - 1];
+              const rightOk = mask[r + x] || mask[r + x + 1];
+              if (leftOk && rightOk) parallelSupport++;
+            }
+            if (parallelSupport >= 3) {
+              for (let fillX = lastOn + 1; fillX < x; fillX++) {
+                out[rowOffset + fillX] = 1;
+              }
+            }
           }
         }
         lastOn = x;
@@ -315,13 +381,46 @@ function closeDoubleLineGaps(
   }
 
   const finalOut = new Uint8Array(out);
-  for (let x = 0; x < w; x++) {
+  for (let x = 2; x < w - 2; x++) {
     let lastOn = -1;
-    for (let y = 0; y < h; y++) {
+    for (let y = 2; y < h - 2; y++) {
       if (out[y * w + x]) {
-        if (lastOn >= 0 && y - lastOn > 1 && y - lastOn <= maxGap) {
-          for (let fillY = lastOn + 1; fillY < y; fillY++) {
-            finalOut[fillY * w + x] = 1;
+        const gap = y - lastOn - 1;
+        if (lastOn >= 2 && gap >= 1 && gap <= maxGap) {
+          let outerRuns = 0;
+          let inRun = false;
+          for (let oy = Math.max(0, lastOn - 10); oy <= lastOn - 2; oy++) {
+            const on = out[oy * w + x] === 1;
+            if (on && !inRun) {
+              outerRuns++;
+              inRun = true;
+            } else if (!on) {
+              inRun = false;
+            }
+          }
+          inRun = false;
+          for (let oy = y + 2; oy <= Math.min(h - 1, y + 10); oy++) {
+            const on = out[oy * w + x] === 1;
+            if (on && !inRun) {
+              outerRuns++;
+              inRun = true;
+            } else if (!on) {
+              inRun = false;
+            }
+          }
+
+          if (outerRuns === 0) {
+            let parallelSupport = 0;
+            for (let dx = -2; dx <= 2; dx++) {
+              const leftOk = out[lastOn * w + x + dx] || out[(lastOn - 1) * w + x + dx];
+              const rightOk = out[y * w + x + dx] || out[(y + 1) * w + x + dx];
+              if (leftOk && rightOk) parallelSupport++;
+            }
+            if (parallelSupport >= 3) {
+              for (let fillY = lastOn + 1; fillY < y; fillY++) {
+                finalOut[fillY * w + x] = 1;
+              }
+            }
           }
         }
         lastOn = y;
@@ -415,6 +514,349 @@ function morphologicalOpen(
 }
 
 /**
+ * Extracts sub-pixel / anti-aliased 1px fine detail ridges (for window symbols & door arcs that
+ * fall above Otsu threshold due to downscaling) and directly extracts multi-line window bands.
+ * Encodes detailMask bitflags: bit 0 (1) = rawMask, bit 1 (2) = hRidge, bit 2 (4) = vRidge.
+ */
+function extractFineDetailAndWindowBands(
+  gray: Uint8Array,
+  rawMask: Uint8Array,
+  structuralMask: Uint8Array,
+  w: number,
+  h: number,
+  ocrTextBoxes: OcrTextBoxPx[] = []
+): { detailMask: Uint8Array; winBandsPx: RawSegment[] } {
+  const hRidge = new Uint8Array(w * h);
+  const vRidge = new Uint8Array(w * h);
+
+  for (let y = 4; y < h - 4; y++) {
+    const row = y * w;
+    for (let x = 4; x < w - 4; x++) {
+      const idx = row + x;
+      const g = gray[idx];
+      if (g > 236) continue;
+
+      const gUp = gray[(y - 1) * w + x];
+      const gDn = gray[(y + 1) * w + x];
+      if (g <= gUp && g <= gDn && (g < gUp || g < gDn)) {
+        let topMax = 0;
+        let botMax = 0;
+        for (let dy = 1; dy <= 5; dy++) {
+          const vTop = gray[(y - dy) * w + x];
+          const vBot = gray[(y + dy) * w + x];
+          if (vTop > topMax) topMax = vTop;
+          if (vBot > botMax) botMax = vBot;
+        }
+        if (topMax - g >= 10 && botMax - g >= 10 && Math.max(topMax, botMax) - g >= 15) {
+          hRidge[idx] = 1;
+        }
+      }
+
+      const gLt = gray[row + x - 1];
+      const gRt = gray[row + x + 1];
+      if (g <= gLt && g <= gRt && (g < gLt || g < gRt)) {
+        let leftMax = 0;
+        let rightMax = 0;
+        for (let dx = 1; dx <= 5; dx++) {
+          const vLt = gray[row + x - dx];
+          const vRt = gray[row + x + dx];
+          if (vLt > leftMax) leftMax = vLt;
+          if (vRt > rightMax) rightMax = vRt;
+        }
+        if (leftMax - g >= 10 && rightMax - g >= 10 && Math.max(leftMax, rightMax) - g >= 15) {
+          vRidge[idx] = 1;
+        }
+      }
+    }
+  }
+
+  for (const box of ocrTextBoxes) {
+    const x0 = Math.max(0, box.x0 - 1);
+    const y0 = Math.max(0, box.y0 - 1);
+    const x1 = Math.min(w - 1, box.x1 + 1);
+    const y1 = Math.min(h - 1, box.y1 + 1);
+    for (let y = y0; y <= y1; y++) {
+      const row = y * w;
+      for (let x = x0; x <= x1; x++) {
+        const idx = row + x;
+        if (!structuralMask[idx]) {
+          hRidge[idx] = 0;
+          vRidge[idx] = 0;
+        }
+      }
+    }
+  }
+
+  const detailMask = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    detailMask[i] = (rawMask[i] ? 1 : 0) | (hRidge[i] ? 2 : 0) | (vRidge[i] ? 4 : 0);
+  }
+
+  interface WinCrossRun {
+    p0: number;
+    p1: number;
+    pc: number;
+    thick: number;
+  }
+
+  interface WinChain {
+    start: number;
+    end: number;
+    p0Sum: number;
+    p1Sum: number;
+    tSum: number;
+    count: number;
+    gaps: number;
+  }
+
+  // Extract horizontal multi-line window bands (2..5 parallel thin hRidge strokes within 3..16px)
+  const hColRuns: WinCrossRun[][] = Array.from({ length: w }, () => []);
+  for (let x = 2; x < w - 2; x++) {
+    let y = 2;
+    while (y < h - 2) {
+      if (!hRidge[y * w + x] || structuralMask[y * w + x]) {
+        y++;
+        continue;
+      }
+      const yStart = y;
+      let yLast = y;
+      let strokeCount = 0;
+      let hitSolid = false;
+      let currY = y;
+      while (currY < h - 2 && currY - yLast <= 6 && currY - yStart <= 18) {
+        if (structuralMask[currY * w + x]) {
+          hitSolid = true;
+          break;
+        }
+        if (hRidge[currY * w + x]) {
+          strokeCount++;
+          yLast = currY;
+          while (currY + 1 < h - 2 && hRidge[(currY + 1) * w + x]) currY++;
+        }
+        currY++;
+      }
+      const bandThick = yLast - yStart + 1;
+      if (!hitSolid && strokeCount >= 2 && strokeCount <= 5 && bandThick >= 3 && bandThick <= 16) {
+        let outerStrokes = 0;
+        for (let dy = 5; dy <= 14; dy++) {
+          if (yStart - dy >= 0 && hRidge[(yStart - dy) * w + x]) outerStrokes++;
+          if (yLast + dy < h && hRidge[(yLast + dy) * w + x]) outerStrokes++;
+        }
+        if (outerStrokes <= 2) {
+          hColRuns[x].push({
+            p0: yStart,
+            p1: yLast,
+            pc: (yStart + yLast) / 2,
+            thick: bandThick,
+          });
+        }
+      }
+      y = Math.max(y + 1, yLast + 1);
+    }
+  }
+
+  let activeHWin: WinChain[] = [];
+  const finishedHWin: WinChain[] = [];
+  for (let x = 0; x < w; x++) {
+    const runs = hColRuns[x];
+    const used = new Set<number>();
+    const next: WinChain[] = [];
+    for (const c of activeHWin) {
+      const avgPc = (c.p0Sum + c.p1Sum) / (2 * c.count);
+      let best = -1;
+      let bestD = 2.5;
+      for (let i = 0; i < runs.length; i++) {
+        if (used.has(i)) continue;
+        const d = Math.abs(runs[i].pc - avgPc);
+        if (d <= bestD) {
+          bestD = d;
+          best = i;
+        }
+      }
+      if (best !== -1) {
+        used.add(best);
+        const r = runs[best];
+        c.end = x;
+        c.p0Sum += r.p0;
+        c.p1Sum += r.p1;
+        c.tSum += r.thick;
+        c.count++;
+        c.gaps = 0;
+        next.push(c);
+      } else if (c.gaps < 3) {
+        c.gaps++;
+        next.push(c);
+      } else {
+        finishedHWin.push(c);
+      }
+    }
+    for (let i = 0; i < runs.length; i++) {
+      if (!used.has(i)) {
+        const r = runs[i];
+        next.push({
+          start: x,
+          end: x,
+          p0Sum: r.p0,
+          p1Sum: r.p1,
+          tSum: r.thick,
+          count: 1,
+          gaps: 0,
+        });
+      }
+    }
+    activeHWin = next;
+  }
+  finishedHWin.push(...activeHWin);
+
+  // Extract vertical multi-line window bands (2..5 parallel thin vRidge strokes within 3..16px)
+  const vRowRuns: WinCrossRun[][] = Array.from({ length: h }, () => []);
+  for (let y = 2; y < h - 2; y++) {
+    const row = y * w;
+    let x = 2;
+    while (x < w - 2) {
+      if (!vRidge[row + x] || structuralMask[row + x]) {
+        x++;
+        continue;
+      }
+      const xStart = x;
+      let xLast = x;
+      let strokeCount = 0;
+      let hitSolid = false;
+      let currX = x;
+      while (currX < w - 2 && currX - xLast <= 6 && currX - xStart <= 18) {
+        if (structuralMask[row + currX]) {
+          hitSolid = true;
+          break;
+        }
+        if (vRidge[row + currX]) {
+          strokeCount++;
+          xLast = currX;
+          while (currX + 1 < w - 2 && vRidge[row + currX + 1]) currX++;
+        }
+        currX++;
+      }
+      const bandThick = xLast - xStart + 1;
+      if (!hitSolid && strokeCount >= 2 && strokeCount <= 5 && bandThick >= 3 && bandThick <= 16) {
+        let outerStrokes = 0;
+        for (let dx = 5; dx <= 14; dx++) {
+          if (xStart - dx >= 0 && vRidge[row + xStart - dx]) outerStrokes++;
+          if (xLast + dx < w && vRidge[row + xLast + dx]) outerStrokes++;
+        }
+        if (outerStrokes <= 2) {
+          vRowRuns[y].push({
+            p0: xStart,
+            p1: xLast,
+            pc: (xStart + xLast) / 2,
+            thick: bandThick,
+          });
+        }
+      }
+      x = Math.max(x + 1, xLast + 1);
+    }
+  }
+
+  let activeVWin: WinChain[] = [];
+  const finishedVWin: WinChain[] = [];
+  for (let y = 0; y < h; y++) {
+    const runs = vRowRuns[y];
+    const used = new Set<number>();
+    const next: WinChain[] = [];
+    for (const c of activeVWin) {
+      const avgPc = (c.p0Sum + c.p1Sum) / (2 * c.count);
+      let best = -1;
+      let bestD = 2.5;
+      for (let i = 0; i < runs.length; i++) {
+        if (used.has(i)) continue;
+        const d = Math.abs(runs[i].pc - avgPc);
+        if (d <= bestD) {
+          bestD = d;
+          best = i;
+        }
+      }
+      if (best !== -1) {
+        used.add(best);
+        const r = runs[best];
+        c.end = y;
+        c.p0Sum += r.p0;
+        c.p1Sum += r.p1;
+        c.tSum += r.thick;
+        c.count++;
+        c.gaps = 0;
+        next.push(c);
+      } else if (c.gaps < 3) {
+        c.gaps++;
+        next.push(c);
+      } else {
+        finishedVWin.push(c);
+      }
+    }
+    for (let i = 0; i < runs.length; i++) {
+      if (!used.has(i)) {
+        const r = runs[i];
+        next.push({
+          start: y,
+          end: y,
+          p0Sum: r.p0,
+          p1Sum: r.p1,
+          tSum: r.thick,
+          count: 1,
+          gaps: 0,
+        });
+      }
+    }
+    activeVWin = next;
+  }
+  finishedVWin.push(...activeVWin);
+
+  const rawWinBandsPx: RawSegment[] = [
+    ...finishedHWin
+      .filter((c) => c.end - c.start >= 22 && c.count >= 16)
+      .map((c) => ({
+        axis: 'h' as const,
+        pos: Math.round(((c.p0Sum + c.p1Sum) / (2 * c.count)) * 2) / 2,
+        start: c.start,
+        end: c.end,
+        thickness: Math.max(4, Math.round(c.tSum / c.count)),
+      })),
+    ...finishedVWin
+      .filter((c) => c.end - c.start >= 22 && c.count >= 16)
+      .map((c) => ({
+        axis: 'v' as const,
+        pos: Math.round(((c.p0Sum + c.p1Sum) / (2 * c.count)) * 2) / 2,
+        start: c.start,
+        end: c.end,
+        thickness: Math.max(4, Math.round(c.tSum / c.count)),
+      })),
+  ];
+
+  // Suppress duplicate inner/outer parallel window bands across deep facade piers (within 28px with >=65% overlap),
+  // keeping the outer band closer to the building perimeter.
+  const winBandsPx = rawWinBandsPx.filter((wb, idx) => {
+    const wbLen = wb.end - wb.start;
+    const midCanvas = wb.axis === 'h' ? h * 0.5 : w * 0.5;
+    const wbDistToEdge = wb.pos < midCanvas ? wb.pos : (wb.axis === 'h' ? h - wb.pos : w - wb.pos);
+    for (let j = 0; j < rawWinBandsPx.length; j++) {
+      if (idx === j) continue;
+      const other = rawWinBandsPx[j];
+      if (other.axis !== wb.axis) continue;
+      if (Math.abs(wb.pos - other.pos) > 28) continue;
+      const overlap = Math.min(wb.end, other.end) - Math.max(wb.start, other.start);
+      const minLen = Math.min(wbLen, other.end - other.start);
+      if (overlap >= minLen * 0.65) {
+        const otherDistToEdge =
+          other.pos < midCanvas ? other.pos : (other.axis === 'h' ? h - other.pos : w - other.pos);
+        if (otherDistToEdge < wbDistToEdge || (otherDistToEdge === wbDistToEdge && j < idx)) {
+          return false;
+        }
+      }
+    }
+    return true;
+  });
+
+  return { detailMask, winBandsPx };
+}
+
+/**
  * Extracts directional wall bands (horizontal & vertical) from the cleaned binary wall mask.
  */
 function extractDirectionalWallSegments(
@@ -422,9 +864,10 @@ function extractDirectionalWallSegments(
   w: number,
   h: number,
   minLengthPx: number,
-  minThicknessPx: number
+  minThicknessPx: number,
+  dominantWallThickPx = 6
 ): RawSegment[] {
-  const maxWallThicknessPx = Math.max(24, Math.round(Math.min(w, h) * 0.05));
+  const maxWallThicknessPx = Math.min(26, Math.max(16, Math.round(dominantWallThickPx * 2.6)));
 
   interface ColRun {
     y0: number;
@@ -515,7 +958,6 @@ function extractDirectionalWallSegments(
             r.thick > Math.max(avgT + 3, 12) &&
             (Math.abs(r.y0 - avgY0) <= 2.0 || Math.abs(r.y1 - avgY1) <= 2.0)
           ) {
-            // Local one-sided thickening (pilaster / step block) where one wall face stays flush
             bestIdx = i;
             bestMode = 'flush_thick';
           }
@@ -538,7 +980,7 @@ function extractDirectionalWallSegments(
         continue;
       }
 
-      // Check if column x is a vertical wall junction that covers avgYc
+      // Check if column x is a vertical wall junction or Poché pier that covers avgYc
       let throughJunction = false;
       for (let i = 0; i < runs.length; i++) {
         const r = runs[i];
@@ -548,7 +990,7 @@ function extractDirectionalWallSegments(
         }
       }
 
-      if (throughJunction && chain.junctionGap < maxWallThicknessPx) {
+      if (throughJunction && chain.junctionGap < maxWallThicknessPx * 2.2) {
         chain.end = x;
         chain.junctionGap++;
         nextActive.push(chain);
@@ -587,8 +1029,8 @@ function extractDirectionalWallSegments(
     const halfT = Math.max(4, Math.min(7, Math.round(avgT * 0.55)));
 
     // If the chain ended inside a perpendicular junction or corner step without resuming normal runs,
-    // trim c.end to the centerline of that corner/junction so it doesn't overshoot into open space
-    if (c.end > c.lastNormalEnd) {
+    // trim c.end to the centerline of that corner/junction unless it ran through a wide corner pier
+    if (c.end > c.lastNormalEnd && c.end - c.lastNormalEnd <= maxWallThicknessPx) {
       c.end = c.lastNormalEnd + Math.min(halfT, c.end - c.lastNormalEnd);
     }
 
@@ -596,7 +1038,7 @@ function extractDirectionalWallSegments(
     let backGap = 0;
     let touchedPerpWall = false;
     let touchedStepBlock = false;
-    while (c.start > 0 && backGap < 18) {
+    while (c.start > 0 && backGap < maxWallThicknessPx * 2) {
       const prevRuns = colRuns[c.start - 1];
       const hitsStep = prevRuns.some(
         (r) =>
@@ -623,7 +1065,11 @@ function extractDirectionalWallSegments(
         break;
       }
     }
-    if (touchedPerpWall && c.firstNormalStart - c.start > halfT) {
+    if (
+      touchedPerpWall &&
+      c.firstNormalStart - c.start > halfT &&
+      c.firstNormalStart - c.start <= maxWallThicknessPx
+    ) {
       c.start = c.firstNormalStart - halfT;
     } else if (touchedStepBlock && c.firstNormalStart - c.start > halfT) {
       c.start += Math.min(halfT, c.firstNormalStart - c.start);
@@ -713,7 +1159,7 @@ function extractDirectionalWallSegments(
         }
       }
 
-      if (throughJunction && chain.junctionGap < maxWallThicknessPx) {
+      if (throughJunction && chain.junctionGap < maxWallThicknessPx * 2.2) {
         chain.end = y;
         chain.junctionGap++;
         nextActive.push(chain);
@@ -751,14 +1197,14 @@ function extractDirectionalWallSegments(
     const avgT = c.tSum / c.validRows;
     const halfT = Math.max(4, Math.min(7, Math.round(avgT * 0.55)));
 
-    if (c.end > c.lastNormalEnd) {
+    if (c.end > c.lastNormalEnd && c.end - c.lastNormalEnd <= maxWallThicknessPx) {
       c.end = c.lastNormalEnd + Math.min(halfT, c.end - c.lastNormalEnd);
     }
 
     let backGap = 0;
     let touchedPerpWall = false;
     let touchedStepBlock = false;
-    while (c.start > 0 && backGap < 18) {
+    while (c.start > 0 && backGap < maxWallThicknessPx * 2) {
       const prevRuns = rowRuns[c.start - 1];
       const hitsPerp = prevRuns.some(
         (r) => r.thick > maxWallThicknessPx && r.x0 <= avgXc + 2 && r.x1 >= avgXc - 2
@@ -783,7 +1229,11 @@ function extractDirectionalWallSegments(
         break;
       }
     }
-    if (touchedPerpWall && c.firstNormalStart - c.start > halfT) {
+    if (
+      touchedPerpWall &&
+      c.firstNormalStart - c.start > halfT &&
+      c.firstNormalStart - c.start <= maxWallThicknessPx
+    ) {
       c.start = c.firstNormalStart - halfT;
     } else if (touchedStepBlock && c.firstNormalStart - c.start > 10) {
       c.start = c.firstNormalStart - Math.round((c.firstNormalStart - c.start) * 0.55);
@@ -815,8 +1265,8 @@ function extractDirectionalWallSegments(
       .filter((c) => {
         const len = c.end - c.start;
         const joinedCorner = c.start < c.firstNormalStart || c.end > c.lastNormalEnd;
-        const minLen = joinedCorner ? Math.max(6, Math.round(minLengthPx * 0.7)) : minLengthPx;
-        const minValid = joinedCorner ? 4 : Math.min(7, Math.round(minLengthPx * 0.5));
+        const minLen = joinedCorner ? 5 : minLengthPx;
+        const minValid = joinedCorner ? 2 : Math.min(7, Math.round(minLengthPx * 0.5));
         return len >= minLen && c.validCols >= minValid;
       })
       .map((c) => {
@@ -837,8 +1287,8 @@ function extractDirectionalWallSegments(
       .filter((c) => {
         const len = c.end - c.start;
         const joinedCorner = c.start < c.firstNormalStart || c.end > c.lastNormalEnd;
-        const minLen = joinedCorner ? Math.max(6, Math.round(minLengthPx * 0.7)) : minLengthPx;
-        const minValid = joinedCorner ? 4 : Math.min(7, Math.round(minLengthPx * 0.5));
+        const minLen = joinedCorner ? 5 : minLengthPx;
+        const minValid = joinedCorner ? 2 : Math.min(7, Math.round(minLengthPx * 0.5));
         return len >= minLen && c.validRows >= minValid;
       })
       .map((c) => {
@@ -937,7 +1387,7 @@ export function parseDimensionText(
   const cleaned = text
     .replace(/[×✕＊*]/g, 'x')
     .replace(/[""״”‟]/g, '"')
-    .replace(/[''′´`’‘]/g, "'")
+    .replace(/[''′´`’‘°]/g, "'")
     .replace(/''/g, '"')
     .trim();
 
@@ -989,8 +1439,9 @@ export function parseDimensionText(
       cm2 = raw2 * 30.48;
       unit = 'ft';
     } else if (unitToken === 'm') {
-      cm1 = raw1 * 100;
-      cm2 = raw2 * 100;
+      // Handle OCR dropped decimal point in 3-digit meter dimensions like "434x426m" (4.34 x 4.26 m)
+      cm1 = raw1 >= 100 && raw1 <= 999 && !/[.,]/.test(metricPairMatch[1]) ? raw1 : raw1 * 100;
+      cm2 = raw2 >= 100 && raw2 <= 999 && !/[.,]/.test(metricPairMatch[3]) ? raw2 : raw2 * 100;
     } else {
       if (
         (metricPairMatch[1].includes('.') || metricPairMatch[3].includes('.')) &&
@@ -1472,16 +1923,17 @@ export function regularizeFloorplanGraph(
   maskHeight: number,
   cmPerPx: number,
   _minWallLengthCm: number,
-  detectOpenings: boolean
+  detectOpenings: boolean,
+  winBandsCm: RawSegment[] = []
 ): { walls: Wall[]; doors: Door[]; windows: WindowItem[] } {
   const pxToCm = (px: number) => Math.round(px * cmPerPx);
   const collinearToleranceCm = Math.max(4, Math.round(cmPerPx * 2.5));
   const touchingCollinearToleranceCm = Math.max(11, pxToCm(6));
   const smallGapBridgeCm = Math.max(10, pxToCm(7));
-  const maxDoorWidthCm = Math.max(115, pxToCm(64));
-  const maxCornerDoorWidthCm = Math.max(105, pxToCm(58));
+  const maxDoorWidthCm = Math.max(115, pxToCm(54));
+  const maxCornerDoorWidthCm = Math.max(105, pxToCm(52));
   const maxExteriorWindowCm = Math.max(480, pxToCm(240));
-  const minOpeningWidthCm = Math.max(28, pxToCm(15));
+  const minOpeningWidthCm = Math.max(26, pxToCm(14));
   const cornerSnapToleranceCm = Math.max(16, pxToCm(12));
   const stepMinCm = Math.max(12, pxToCm(7));
   const stepMaxCm = Math.max(30, pxToCm(18));
@@ -1495,7 +1947,7 @@ export function regularizeFloorplanGraph(
   let maxX = -Infinity;
   let minY = Infinity;
   let maxY = -Infinity;
-  for (const s of segmentsCm) {
+  for (const s of [...segmentsCm, ...winBandsCm]) {
     if (s.axis === 'h') {
       minX = Math.min(minX, s.start);
       maxX = Math.max(maxX, s.end);
@@ -1512,9 +1964,75 @@ export function regularizeFloorplanGraph(
   const doors: Door[] = [];
   const windows: WindowItem[] = [];
 
+  function isExteriorSpan(
+    axis: 'h' | 'v',
+    posCm: number,
+    startCm: number,
+    endCm: number
+  ): boolean {
+    const midCm = (startCm + endCm) / 2;
+    const rayPadCm = pxToCm(12);
+    const minBlockerLen = pxToCm(16);
+    const maxBlockerDist = pxToCm(180);
+
+    const hasPerpBridgeBetween = (perpAxis: 'h' | 'v', c1: number, c2: number): boolean => {
+      const lo = Math.min(c1, c2);
+      const hi = Math.max(c1, c2);
+      const span = hi - lo;
+      if (span <= pxToCm(25)) return true;
+      const perpList = perpAxis === 'v' ? vSegs : hSegs;
+      return perpList.some((p) => {
+        const overlap = Math.min(p.end, hi) - Math.max(p.start, lo);
+        return overlap >= span * 0.5;
+      });
+    };
+
+    if (axis === 'h') {
+      const blockedNorth = hSegs.some(
+        (s) =>
+          s.end - s.start >= minBlockerLen &&
+          s.pos < posCm - rayPadCm &&
+          posCm - s.pos <= maxBlockerDist &&
+          s.start - rayPadCm <= midCm &&
+          s.end + rayPadCm >= midCm &&
+          hasPerpBridgeBetween('v', s.pos, posCm)
+      );
+      const blockedSouth = hSegs.some(
+        (s) =>
+          s.end - s.start >= minBlockerLen &&
+          s.pos > posCm + rayPadCm &&
+          s.pos - posCm <= maxBlockerDist &&
+          s.start - rayPadCm <= midCm &&
+          s.end + rayPadCm >= midCm &&
+          hasPerpBridgeBetween('v', posCm, s.pos)
+      );
+      return !(blockedNorth && blockedSouth);
+    } else {
+      const blockedWest = vSegs.some(
+        (s) =>
+          s.end - s.start >= minBlockerLen &&
+          s.pos < posCm - rayPadCm &&
+          posCm - s.pos <= maxBlockerDist &&
+          s.start - rayPadCm <= midCm &&
+          s.end + rayPadCm >= midCm &&
+          hasPerpBridgeBetween('h', s.pos, posCm)
+      );
+      const blockedEast = vSegs.some(
+        (s) =>
+          s.end - s.start >= minBlockerLen &&
+          s.pos > posCm + rayPadCm &&
+          s.pos - posCm <= maxBlockerDist &&
+          s.start - rayPadCm <= midCm &&
+          s.end + rayPadCm >= midCm &&
+          hasPerpBridgeBetween('h', posCm, s.pos)
+      );
+      return !(blockedWest && blockedEast);
+    }
+  }
+
   /**
    * Checks whether a span along a wall is on an exterior boundary and contains continuous thin
-   * parallel window lines (either eroded from structuralMask or 2+ parallel dark strokes in rawBinaryMask).
+   * parallel window lines (at least 2 distinct parallel strokes across the span, without a door swing).
    */
   function hasWindowBandInRawMask(
     axis: 'h' | 'v',
@@ -1523,26 +2041,7 @@ export function regularizeFloorplanGraph(
     endCm: number
   ): boolean {
     if (!rawBinaryMask || cmPerPx <= 0) return false;
-
-    const midCm = (startCm + endCm) / 2;
-    const rayPadCm = pxToCm(12);
-    if (axis === 'h') {
-      const blockedNorth = hSegs.some(
-        (s) => s.pos < posCm - rayPadCm && s.start - rayPadCm <= midCm && s.end + rayPadCm >= midCm
-      );
-      const blockedSouth = hSegs.some(
-        (s) => s.pos > posCm + rayPadCm && s.start - rayPadCm <= midCm && s.end + rayPadCm >= midCm
-      );
-      if (blockedNorth && blockedSouth) return false;
-    } else {
-      const blockedWest = vSegs.some(
-        (s) => s.pos < posCm - rayPadCm && s.start - rayPadCm <= midCm && s.end + rayPadCm >= midCm
-      );
-      const blockedEast = vSegs.some(
-        (s) => s.pos > posCm + rayPadCm && s.start - rayPadCm <= midCm && s.end + rayPadCm >= midCm
-      );
-      if (blockedWest && blockedEast) return false;
-    }
+    if (!isExteriorSpan(axis, posCm, startCm, endCm)) return false;
 
     const pxPos = Math.round(posCm / cmPerPx);
     const pxStart = Math.round(Math.min(startCm, endCm) / cmPerPx);
@@ -1550,40 +2049,67 @@ export function regularizeFloorplanGraph(
     const span = pxEnd - pxStart;
     if (span < 12) return false;
 
+    const ridgeBit = axis === 'h' ? 2 : 4;
     let covered = 0;
     let total = 0;
+    let emptyRun = 0;
+    let maxEmptyRun = 0;
+
     for (let t = pxStart + 2; t <= pxEnd - 2; t++) {
       total++;
-      let thinCount = 0;
-      let darkRuns = 0;
-      let inRun = false;
-      for (let d = -8; d <= 8; d++) {
+      let ridgeRuns = 0;
+      let rawRuns = 0;
+      let inRidge = false;
+      let inRaw = false;
+
+      for (let d = -7; d <= 7; d++) {
         const rx = axis === 'h' ? t : pxPos + d;
         const ry = axis === 'h' ? pxPos + d : t;
         if (rx >= 0 && rx < maskWidth && ry >= 0 && ry < maskHeight) {
           const idx = ry * maskWidth + rx;
-          const isRaw = rawBinaryMask[idx] === 1;
-          if (isRaw && (!structuralMask || !structuralMask[idx])) {
-            thinCount++;
+          const isStruct = structuralMask ? structuralMask[idx] === 1 : false;
+          const val = rawBinaryMask[idx];
+          const hasRidge = !isStruct && (val & ridgeBit) !== 0;
+          const hasRaw = !isStruct && (val & 1) !== 0;
+
+          if (hasRidge && !inRidge) {
+            ridgeRuns++;
+            inRidge = true;
+          } else if (!hasRidge) {
+            inRidge = false;
           }
-          if (isRaw && !inRun) {
-            darkRuns++;
-            inRun = true;
-          } else if (!isRaw) {
-            inRun = false;
+
+          if (hasRaw && !inRaw) {
+            rawRuns++;
+            inRaw = true;
+          } else if (!hasRaw) {
+            inRaw = false;
           }
         } else {
-          inRun = false;
+          inRidge = false;
+          inRaw = false;
         }
       }
-      if (thinCount >= 2 || darkRuns >= 2) covered++;
+
+      if (ridgeRuns >= 2 || rawRuns >= 2) {
+        covered++;
+        emptyRun = 0;
+      } else {
+        emptyRun++;
+        if (emptyRun > maxEmptyRun) maxEmptyRun = emptyRun;
+      }
     }
-    return total > 0 && covered / total >= 0.58;
+
+    return (
+      total > 0 &&
+      covered / total >= 0.62 &&
+      maxEmptyRun <= Math.max(6, Math.round(span * 0.15))
+    );
   }
 
   /**
-   * Verifies that a candidate doorway gap is not an empty open-plan room passage by checking
-   * for thin door leaf / swing arc / bi-fold pixels near the opening (or short closet jambs).
+   * Verifies that a candidate doorway gap is not an empty open-plan room passage nor blocked
+   * by an intersecting structural wall, and contains thin door leaf / swing arc / bi-fold pixels.
    */
   function hasDoorSignatureInRawMask(
     axis: 'h' | 'v',
@@ -1599,28 +2125,111 @@ export function regularizeFloorplanGraph(
     if (span < 10) return false;
 
     let thinPixels = 0;
-    const searchDepth = Math.min(28, Math.max(14, Math.round(span * 0.6)));
+    let nearLineThinPixels = 0;
+    let swingZoneThinPixels = 0;
+    let structBlockedCols = 0;
+    const searchDepth = Math.min(28, Math.max(14, Math.round(span * 0.65)));
+
     for (let t = pxStart; t <= pxEnd; t++) {
+      const isDeepInterior = t >= pxStart + 4 && t <= pxEnd - 4;
+      let colHasStructOnLine = false;
       for (let d = -searchDepth; d <= searchDepth; d++) {
         const rx = axis === 'h' ? t : pxPos + d;
         const ry = axis === 'h' ? pxPos + d : t;
         if (rx >= 0 && rx < maskWidth && ry >= 0 && ry < maskHeight) {
           const idx = ry * maskWidth + rx;
-          if (rawBinaryMask[idx] && (!structuralMask || !structuralMask[idx])) {
+          const isStruct = structuralMask ? structuralMask[idx] === 1 : false;
+          if (isDeepInterior && Math.abs(d) <= 1 && isStruct) {
+            colHasStructOnLine = true;
+          }
+          if (rawBinaryMask[idx] && !isStruct) {
             thinPixels++;
+            if (Math.abs(d) <= 7) {
+              nearLineThinPixels++;
+            }
+            if (Math.abs(d) >= 2) {
+              swingZoneThinPixels++;
+            }
           }
         }
       }
+      if (colHasStructOnLine) {
+        structBlockedCols++;
+      }
     }
-    return thinPixels >= 6;
+    if (structBlockedCols >= 3) return false;
+    return nearLineThinPixels >= 2 && swingZoneThinPixels >= 4 && thinPixels >= 8;
+  }
+
+  /**
+   * Extends a wall segment's start and end coordinates across any contiguous thick structural
+   * pier / Poché block in structuralMask so walls and facade window bands connect through piers.
+   */
+  function extendSpanThroughStructuralPiers(
+    axis: 'h' | 'v',
+    posCm: number,
+    startCm: number,
+    endCm: number,
+    allowMullionGapPx = 0
+  ): { startCm: number; endCm: number } {
+    if (!structuralMask || cmPerPx <= 0) return { startCm, endCm };
+    const pxPos = Math.round(posCm / cmPerPx);
+    let pxStart = Math.round(startCm / cmPerPx);
+    let pxEnd = Math.round(endCm / cmPerPx);
+    const maxPierPx = 64;
+
+    const hasStructAt = (t: number): boolean => {
+      for (let d = -4; d <= 4; d++) {
+        const rx = axis === 'h' ? t : pxPos + d;
+        const ry = axis === 'h' ? pxPos + d : t;
+        if (rx >= 0 && rx < maskWidth && ry >= 0 && ry < maskHeight) {
+          if (structuralMask[ry * maskWidth + rx]) return true;
+        }
+      }
+      return false;
+    };
+
+    if (!hasStructAt(pxStart - 1) && allowMullionGapPx > 0) {
+      for (let g = 1; g <= allowMullionGapPx; g++) {
+        if (pxStart - g >= 0 && hasStructAt(pxStart - g)) {
+          pxStart -= g;
+          break;
+        }
+      }
+    }
+    let steps = 0;
+    while (pxStart > 0 && steps < maxPierPx && hasStructAt(pxStart - 1)) {
+      pxStart--;
+      steps++;
+    }
+
+    const maxLimit = axis === 'h' ? maskWidth - 1 : maskHeight - 1;
+    if (!hasStructAt(pxEnd + 1) && allowMullionGapPx > 0) {
+      for (let g = 1; g <= allowMullionGapPx; g++) {
+        if (pxEnd + g <= maxLimit && hasStructAt(pxEnd + g)) {
+          pxEnd += g;
+          break;
+        }
+      }
+    }
+    steps = 0;
+    while (pxEnd < maxLimit && steps < maxPierPx && hasStructAt(pxEnd + 1)) {
+      pxEnd++;
+      steps++;
+    }
+
+    return {
+      startCm: pxStart < Math.round(startCm / cmPerPx) ? pxStart * cmPerPx : startCm,
+      endCm: pxEnd > Math.round(endCm / cmPerPx) ? pxEnd * cmPerPx : endCm,
+    };
   }
 
   function formatWindowWidth(gapCm: number): number {
-    return Math.round(Math.max(pxToCm(30), gapCm * 0.95) / 5) * 5;
+    return Math.round(Math.max(pxToCm(28), gapCm * 0.95) / 5) * 5;
   }
 
   function formatDoorWidth(gapCm: number): number {
-    const minD = Math.max(55, pxToCm(28));
+    const minD = Math.max(55, pxToCm(26));
     const maxD = Math.max(95, pxToCm(52));
     return Math.round(Math.min(maxD, Math.max(minD, gapCm * 0.92)) / 5) * 5;
   }
@@ -1641,10 +2250,11 @@ export function regularizeFloorplanGraph(
 
     const sortedIntervals: WeightedInterval[] = [...group]
       .map((s) => {
-        const len = Math.max(1, s.end - s.start);
+        const ext = extendSpanThroughStructuralPiers(axis, s.pos, s.start, s.end);
+        const len = Math.max(1, ext.endCm - ext.startCm);
         return {
-          start: s.start,
-          end: s.end,
+          start: ext.startCm,
+          end: ext.endCm,
           posWeight: s.pos * len,
           thickWeight: s.thickness * len,
           totalLen: len,
@@ -1696,26 +2306,21 @@ export function regularizeFloorplanGraph(
         )
       );
 
-      const isExteriorLine =
-        axis === 'h'
-          ? Math.abs(combinedPos - minY) < pxToCm(25) || Math.abs(combinedPos - maxY) < pxToCm(25)
-          : Math.abs(combinedPos - minX) < pxToCm(25) || Math.abs(combinedPos - maxX) < pxToCm(25);
-
       const isWindowSpan =
         gapWidth >= minOpeningWidthCm &&
         gapWidth <= maxExteriorWindowCm &&
         hasWindowBandInRawMask(axis, combinedPos, prev.end, curr.start);
 
       const isStandardOpening =
+        !isWindowSpan &&
         gapWidth >= minOpeningWidthCm &&
         gapWidth <= maxDoorWidthCm &&
         hasDoorSignatureInRawMask(axis, combinedPos, prev.end, curr.start);
 
       if (isWindowSpan || isStandardOpening) {
         const gapCenter = Math.round((prev.end + curr.start) / 2);
-        const isWindow = isWindowSpan || (isExteriorLine && gapWidth >= pxToCm(64));
 
-        if (isWindow) {
+        if (isWindowSpan) {
           windows.push({
             id: `win_imp_${windows.length + 1}_${Date.now().toString(36)}`,
             x: axis === 'h' ? gapCenter + ORIGIN_OFFSET_X : combinedPos + ORIGIN_OFFSET_X,
@@ -1969,7 +2574,6 @@ export function regularizeFloorplanGraph(
         let bestTopH: RawSegment | null = null;
         let bestTopGap = Infinity;
         for (const h of cleanH) {
-          // If v is beyond h's endpoint and that endpoint already turned at a step wall, skip h
           const coversV = v.pos >= h.start - pxToCm(3) && v.pos <= h.end + pxToCm(3);
           const nearUnconnectedEnd =
             (Math.abs(v.pos - h.start) <= cornerSnapToleranceCm && !hTouchesV(h.pos, h.start)) ||
@@ -1989,7 +2593,8 @@ export function regularizeFloorplanGraph(
             hasWindowBandInRawMask('v', v.pos, bestTopH.pos, v.start);
           const hTerminatesNearV =
             Math.abs(bestTopH.start - v.pos) <= cornerSnapToleranceCm * 1.4 ||
-            Math.abs(bestTopH.end - v.pos) <= cornerSnapToleranceCm * 1.4;
+            Math.abs(bestTopH.end - v.pos) <= cornerSnapToleranceCm * 1.4 ||
+            (v.end - v.start <= pxToCm(25) && vTouchesH(v.pos, v.end));
           const isDoor =
             !isWin &&
             bestTopGap >= minOpeningWidthCm &&
@@ -2050,7 +2655,8 @@ export function regularizeFloorplanGraph(
             hasWindowBandInRawMask('v', v.pos, v.end, bestBotH.pos);
           const hTerminatesNearV =
             Math.abs(bestBotH.start - v.pos) <= cornerSnapToleranceCm * 1.4 ||
-            Math.abs(bestBotH.end - v.pos) <= cornerSnapToleranceCm * 1.4;
+            Math.abs(bestBotH.end - v.pos) <= cornerSnapToleranceCm * 1.4 ||
+            (v.end - v.start <= pxToCm(25) && vTouchesH(v.pos, v.start));
           const isDoor =
             !isWin &&
             bestBotGap >= minOpeningWidthCm &&
@@ -2108,7 +2714,8 @@ export function regularizeFloorplanGraph(
             hasWindowBandInRawMask('h', h.pos, bestLeftV.pos, h.start);
           const vTerminatesNearH =
             Math.abs(bestLeftV.start - h.pos) <= cornerSnapToleranceCm * 1.4 ||
-            Math.abs(bestLeftV.end - h.pos) <= cornerSnapToleranceCm * 1.4;
+            Math.abs(bestLeftV.end - h.pos) <= cornerSnapToleranceCm * 1.4 ||
+            (h.end - h.start <= pxToCm(25) && hTouchesV(h.pos, h.end));
           const isDoor =
             !isWin &&
             bestLeftGap >= minOpeningWidthCm &&
@@ -2164,7 +2771,8 @@ export function regularizeFloorplanGraph(
             hasWindowBandInRawMask('h', h.pos, h.end, bestRightV.pos);
           const vTerminatesNearH =
             Math.abs(bestRightV.start - h.pos) <= cornerSnapToleranceCm * 1.4 ||
-            Math.abs(bestRightV.end - h.pos) <= cornerSnapToleranceCm * 1.4;
+            Math.abs(bestRightV.end - h.pos) <= cornerSnapToleranceCm * 1.4 ||
+            (h.end - h.start <= pxToCm(25) && hTouchesV(h.pos, h.start));
           const isDoor =
             !isWin &&
             bestRightGap >= minOpeningWidthCm &&
@@ -2195,6 +2803,253 @@ export function regularizeFloorplanGraph(
             h.end = bestRightV.pos;
           }
         }
+      }
+    }
+
+    // Detect closet/alcove doors spanning between two matching parallel side walls that both terminate at the opening line
+    const sortedV = [...cleanV].sort((a, b) => a.pos - b.pos);
+    for (let i = 0; i < sortedV.length; i++) {
+      for (let j = i + 1; j < sortedV.length; j++) {
+        const v1 = sortedV[i];
+        const v2 = sortedV[j];
+        const gapX = v2.pos - v1.pos;
+        if (gapX < minOpeningWidthCm || gapX > maxCornerDoorWidthCm) continue;
+
+        const candidateYs: number[] = [];
+        if (
+          !vTouchesH(v1.pos, v1.start) &&
+          !vTouchesH(v2.pos, v2.start) &&
+          Math.abs(v1.start - v2.start) <= pxToCm(6) &&
+          vTouchesH(v1.pos, v1.end) &&
+          vTouchesH(v2.pos, v2.end)
+        ) {
+          candidateYs.push((v1.start + v2.start) / 2);
+        }
+        if (
+          !vTouchesH(v1.pos, v1.end) &&
+          !vTouchesH(v2.pos, v2.end) &&
+          Math.abs(v1.end - v2.end) <= pxToCm(6) &&
+          vTouchesH(v1.pos, v1.start) &&
+          vTouchesH(v2.pos, v2.start)
+        ) {
+          candidateYs.push((v1.end + v2.end) / 2);
+        }
+
+        for (const y0 of candidateYs) {
+          const blockedByMidV = sortedV.some(
+            (vm, k) => k > i && k < j && y0 >= vm.start - pxToCm(4) && y0 <= vm.end + pxToCm(4)
+          );
+          if (blockedByMidV) continue;
+          const alreadyHasH = cleanH.some(
+            (h) =>
+              Math.abs(h.pos - y0) <= cornerSnapToleranceCm &&
+              Math.min(h.end, v2.pos) - Math.max(h.start, v1.pos) >= gapX * 0.5
+          );
+          if (alreadyHasH) continue;
+          if (
+            !hasWindowBandInRawMask('h', y0, v1.pos, v2.pos) &&
+            hasDoorSignatureInRawMask('h', y0, v1.pos, v2.pos)
+          ) {
+            const center = Math.round((v1.pos + v2.pos) / 2);
+            doors.push({
+              id: `door_imp_${doors.length + 1}_${Date.now().toString(36)}`,
+              x: Math.round(center + ORIGIN_OFFSET_X),
+              y: Math.round(y0 + ORIGIN_OFFSET_Y),
+              width: formatDoorWidth(gapX),
+              rotation: 0,
+              swingDirection: 'left',
+            });
+            cleanH.push({
+              axis: 'h',
+              pos: Math.round(y0),
+              start: Math.round(v1.pos),
+              end: Math.round(v2.pos),
+              thickness: Math.min(v1.thickness, v2.thickness),
+            });
+          }
+        }
+      }
+    }
+
+    const sortedH = [...cleanH].sort((a, b) => a.pos - b.pos);
+    for (let i = 0; i < sortedH.length; i++) {
+      for (let j = i + 1; j < sortedH.length; j++) {
+        const h1 = sortedH[i];
+        const h2 = sortedH[j];
+        const gapY = h2.pos - h1.pos;
+        if (gapY < minOpeningWidthCm || gapY > maxCornerDoorWidthCm) continue;
+
+        const candidateXs: number[] = [];
+        if (
+          !hTouchesV(h1.pos, h1.start) &&
+          !hTouchesV(h2.pos, h2.start) &&
+          Math.abs(h1.start - h2.start) <= pxToCm(6) &&
+          hTouchesV(h1.pos, h1.end) &&
+          hTouchesV(h2.pos, h2.end)
+        ) {
+          candidateXs.push((h1.start + h2.start) / 2);
+        }
+        if (
+          !hTouchesV(h1.pos, h1.end) &&
+          !hTouchesV(h2.pos, h2.end) &&
+          Math.abs(h1.end - h2.end) <= pxToCm(6) &&
+          hTouchesV(h1.pos, h1.start) &&
+          hTouchesV(h2.pos, h2.start)
+        ) {
+          candidateXs.push((h1.end + h2.end) / 2);
+        }
+
+        for (const x0 of candidateXs) {
+          const blockedByMidH = sortedH.some(
+            (hm, k) => k > i && k < j && x0 >= hm.start - pxToCm(4) && x0 <= hm.end + pxToCm(4)
+          );
+          if (blockedByMidH) continue;
+          const alreadyHasV = cleanV.some(
+            (v) =>
+              Math.abs(v.pos - x0) <= cornerSnapToleranceCm &&
+              Math.min(v.end, h2.pos) - Math.max(v.start, h1.pos) >= gapY * 0.5
+          );
+          if (alreadyHasV) continue;
+          if (
+            !hasWindowBandInRawMask('v', x0, h1.pos, h2.pos) &&
+            hasDoorSignatureInRawMask('v', x0, h1.pos, h2.pos)
+          ) {
+            const center = Math.round((h1.pos + h2.pos) / 2);
+            doors.push({
+              id: `door_imp_${doors.length + 1}_${Date.now().toString(36)}`,
+              x: Math.round(x0 + ORIGIN_OFFSET_X),
+              y: Math.round(center + ORIGIN_OFFSET_Y),
+              width: formatDoorWidth(gapY),
+              rotation: 90,
+              swingDirection: 'left',
+            });
+            cleanV.push({
+              axis: 'v',
+              pos: Math.round(x0),
+              start: Math.round(h1.pos),
+              end: Math.round(h2.pos),
+              thickness: Math.min(h1.thickness, h2.thickness),
+            });
+          }
+        }
+      }
+    }
+
+    // Integrate multi-line exterior window bands (e.g. corner-meeting windows or floor-to-ceiling window walls)
+    const exteriorWinBands = winBandsCm
+      .filter((wb) => isExteriorSpan(wb.axis, wb.pos, wb.start, wb.end))
+      .map((wb) => {
+        const ext = extendSpanThroughStructuralPiers(wb.axis, wb.pos, wb.start, wb.end, 16);
+        return {
+          wb,
+          extStart: ext.startCm,
+          extEnd: ext.endCm,
+        };
+      });
+    const endConnectTol = pxToCm(18);
+    const collinearWinTol = pxToCm(10);
+
+    const isEndpointConnected = (
+      axis: 'h' | 'v',
+      pos: number,
+      endCoord: number,
+      selfWb: RawSegment
+    ): boolean => {
+      const sameAxisWalls = axis === 'h' ? cleanH : cleanV;
+      const perpAxisWalls = axis === 'h' ? cleanV : cleanH;
+      const touchesCollinear = sameAxisWalls.some(
+        (w) =>
+          Math.abs(w.pos - pos) <= collinearWinTol &&
+          (Math.abs(w.start - endCoord) <= endConnectTol ||
+            Math.abs(w.end - endCoord) <= endConnectTol ||
+            (endCoord >= w.start - endConnectTol && endCoord <= w.end + endConnectTol))
+      );
+      if (touchesCollinear) return true;
+
+      const touchesPerpWall = perpAxisWalls.some(
+        (w) =>
+          Math.abs(w.pos - endCoord) <= endConnectTol &&
+          pos >= w.start - endConnectTol &&
+          pos <= w.end + endConnectTol
+      );
+      if (touchesPerpWall) return true;
+
+      const touchesOtherWinBand = exteriorWinBands.some((other) => {
+        if (other.wb === selfWb) return false;
+        if (other.wb.axis !== axis) {
+          return (
+            Math.abs(other.wb.pos - endCoord) <= endConnectTol &&
+            pos >= other.extStart - endConnectTol &&
+            pos <= other.extEnd + endConnectTol
+          );
+        } else {
+          return (
+            Math.abs(other.wb.pos - pos) <= collinearWinTol &&
+            (Math.abs(other.extStart - endCoord) <= endConnectTol ||
+              Math.abs(other.extEnd - endCoord) <= endConnectTol)
+          );
+        }
+      });
+      return touchesOtherWinBand;
+    };
+
+    for (const item of exteriorWinBands) {
+      const { wb, extStart, extEnd } = item;
+      const startConn = isEndpointConnected(wb.axis, wb.pos, extStart, wb);
+      const endConn = isEndpointConnected(wb.axis, wb.pos, extEnd, wb);
+      const wbLen = wb.end - wb.start;
+      if (!(startConn && endConn) && !((startConn || endConn) && wbLen >= pxToCm(38))) {
+        continue;
+      }
+
+      const wbCenter = (wb.start + wb.end) / 2;
+      const alreadyHasWin = windows.some((w) => {
+        const isSameAxis = (wb.axis === 'h' && w.rotation === 0) || (wb.axis === 'v' && w.rotation === 90);
+        if (!isSameAxis) return false;
+        const wPos = wb.axis === 'h' ? w.y - ORIGIN_OFFSET_Y : w.x - ORIGIN_OFFSET_X;
+        const wCenter = wb.axis === 'h' ? w.x - ORIGIN_OFFSET_X : w.y - ORIGIN_OFFSET_Y;
+        return Math.abs(wPos - wb.pos) <= pxToCm(14) && Math.abs(wCenter - wbCenter) <= wbLen * 0.45;
+      });
+
+      const sameAxisWalls = wb.axis === 'h' ? cleanH : cleanV;
+      const matchingWalls = sameAxisWalls.filter(
+        (w) =>
+          Math.abs(w.pos - wb.pos) <= collinearWinTol &&
+          Math.max(w.start - extEnd, extStart - w.end) <= endConnectTol
+      );
+
+      let wallThickness = wb.thickness;
+      if (matchingWalls.length > 0) {
+        const primary = matchingWalls[0];
+        primary.start = Math.min(primary.start, extStart);
+        primary.end = Math.max(primary.end, extEnd);
+        wallThickness = primary.thickness;
+        for (let k = 1; k < matchingWalls.length; k++) {
+          const extra = matchingWalls[k];
+          primary.start = Math.min(primary.start, extra.start);
+          primary.end = Math.max(primary.end, extra.end);
+          const idx = sameAxisWalls.indexOf(extra);
+          if (idx !== -1) sameAxisWalls.splice(idx, 1);
+        }
+      } else {
+        sameAxisWalls.push({
+          axis: wb.axis,
+          pos: Math.round(wb.pos),
+          start: Math.round(extStart),
+          end: Math.round(extEnd),
+          thickness: Math.max(12, Math.min(20, wb.thickness)),
+        });
+      }
+
+      if (!alreadyHasWin) {
+        windows.push({
+          id: `win_imp_${windows.length + 1}_${Date.now().toString(36)}`,
+          x: Math.round((wb.axis === 'h' ? wbCenter : wb.pos) + ORIGIN_OFFSET_X),
+          y: Math.round((wb.axis === 'h' ? wb.pos : wbCenter) + ORIGIN_OFFSET_Y),
+          width: formatWindowWidth(wbLen),
+          thickness: wallThickness,
+          rotation: wb.axis === 'h' ? 0 : 90,
+        });
       }
     }
   }
@@ -2229,11 +3084,16 @@ export function regularizeFloorplanGraph(
     }
   }
 
+  const minDanglingStubCm = pxToCm(8);
   const walls: Wall[] = [];
   let wallIdx = 1;
 
   for (const h of cleanH) {
-    if (h.end - h.start < minSegLenCm) continue;
+    const len = h.end - h.start;
+    if (len < minSegLenCm) continue;
+    if (len < minDanglingStubCm && (!hTouchesV(h.pos, h.start) || !hTouchesV(h.pos, h.end))) {
+      continue;
+    }
     walls.push({
       id: `w_imp_${wallIdx++}`,
       start: { x: Math.round(h.start + ORIGIN_OFFSET_X), y: Math.round(h.pos + ORIGIN_OFFSET_Y) },
@@ -2243,7 +3103,11 @@ export function regularizeFloorplanGraph(
   }
 
   for (const v of cleanV) {
-    if (v.end - v.start < minSegLenCm) continue;
+    const len = v.end - v.start;
+    if (len < minSegLenCm) continue;
+    if (len < minDanglingStubCm && (!vTouchesH(v.pos, v.start) || !vTouchesH(v.pos, v.end))) {
+      continue;
+    }
     walls.push({
       id: `w_imp_${wallIdx++}`,
       start: { x: Math.round(v.pos + ORIGIN_OFFSET_X), y: Math.round(v.start + ORIGIN_OFFSET_Y) },
@@ -2355,19 +3219,19 @@ export function parseFloorplanImage(
     }
   }
 
-  // Step 3: Optional double-line closing (only bridge >1px gaps when the floorplan does not already have thick solid walls)
+  // Step 3: Optional double-line closing (smartly ignores periodic shelf/stair combs)
   const preCloseThickPx = estimateStructuralWallThickness(ccCleanedMask, w, h);
-  const closeGapPx = preCloseThickPx >= 6 ? 1 : Math.max(3, options.minWallThicknessPx);
+  const closeGapPx = preCloseThickPx >= 5 ? 1 : Math.max(3, options.minWallThicknessPx);
   const closedMask = options.closeHollowWalls
     ? closeDoubleLineGaps(ccCleanedMask, w, h, closeGapPx)
     : ccCleanedMask;
 
-  // Step 4: Auto-adapt erosion kernel to structural wall thickness so thin 1-4px fixture lines
-  // (toilets, sinks, bathtubs, counters, door arcs) attached to walls are stripped while >=5px walls survive
+  // Step 4: Auto-adapt erosion kernel to structural wall thickness so thin 1-2px fixture lines
+  // (toilets, sinks, bathtubs, counters, door arcs, closet shelves) attached to walls are stripped while walls survive
   const dominantWallThickPx = estimateStructuralWallThickness(closedMask, w, h);
   const autoKernelPx = Math.max(
     options.minWallThicknessPx,
-    Math.min(5, Math.round(dominantWallThickPx * 0.5))
+    Math.min(5, Math.max(2, Math.round(dominantWallThickPx * 0.5)))
   );
 
   const openedMask = morphologicalOpen(closedMask, w, h, autoKernelPx);
@@ -2379,6 +3243,17 @@ export function parseFloorplanImage(
     w,
     h,
     Math.max(20, Math.round(Math.max(w, h) * 0.035))
+  );
+
+  // Step 6: Extract sub-pixel fine detail ridges (for anti-aliased 1px window lines and door arcs)
+  // and multi-line window bands
+  const { detailMask, winBandsPx } = extractFineDetailAndWindowBands(
+    gray,
+    rawMask,
+    structuralMask,
+    w,
+    h,
+    ocrTextBoxes
   );
 
   let minPxX = w;
@@ -2413,12 +3288,13 @@ export function parseFloorplanImage(
     w,
     h,
     Math.max(8, Math.round(options.minWallLengthCm / 3.5)),
-    Math.max(3, autoKernelPx - 1)
+    Math.max(3, autoKernelPx - 1),
+    dominantWallThickPx
   );
 
   const ocrMatch = matchDimensionsToPixelWalls(
     ocrCandidates,
-    rawSegmentsPx,
+    [...rawSegmentsPx, ...winBandsPx],
     spanPxW
   );
 
@@ -2441,15 +3317,24 @@ export function parseFloorplanImage(
     thickness: Math.max(10, Math.min(25, Math.round(s.thickness * cmPerPx))),
   }));
 
+  const winBandsCm: RawSegment[] = winBandsPx.map((s) => ({
+    axis: s.axis,
+    pos: s.pos * cmPerPx,
+    start: s.start * cmPerPx,
+    end: s.end * cmPerPx,
+    thickness: Math.max(12, Math.min(20, Math.round(s.thickness * cmPerPx))),
+  }));
+
   const { walls, doors, windows } = regularizeFloorplanGraph(
     segmentsCm,
-    rawMask,
+    detailMask,
     structuralMask,
     w,
     h,
     cmPerPx,
     options.minWallLengthCm,
-    options.detectOpenings
+    options.detectOpenings,
+    winBandsCm
   );
 
   const detectedDimensions: DetectedDimension[] = ocrMatch.matched.map((d, idx) => ({
