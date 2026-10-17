@@ -33,11 +33,12 @@
 }
 
 .brand-title {
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 700;
   letter-spacing: -0.02em;
   color: #0f172a;
-  line-height: 1.1;
+  margin: 0;
+  line-height: 1;
 }
 
 .brand-sub {
@@ -760,7 +761,13 @@ kbd {
   margin-top: 12px;
 }
 
-/* Toolbar Import Button Highlight */
+/* Toolbar Import Button Highlight & Indicator Callout */
+.import-btn-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
 .import-highlight-btn {
   background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
   color: #ffffff;
@@ -777,6 +784,66 @@ kbd {
   color: #ffffff;
   box-shadow: 0 4px 10px rgba(37, 99, 235, 0.36);
   transform: translateY(-0.5px);
+}
+
+.import-indicator-callout {
+  position: absolute;
+  top: calc(100% + 12px);
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: #0f172a;
+  color: #ffffff;
+  padding: 10px 14px;
+  border-radius: 8px;
+  box-shadow: 0 10px 25px -4px rgba(15, 23, 42, 0.4), 0 4px 6px -2px rgba(15, 23, 42, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  z-index: 100;
+  width: max-content;
+  max-width: 260px;
+  cursor: pointer;
+  user-select: none;
+  animation: indicator-bounce 2s ease-in-out infinite;
+}
+
+.import-indicator-arrow {
+  position: absolute;
+  top: -6px;
+  left: 50%;
+  margin-left: -6px;
+  width: 12px;
+  height: 12px;
+  background-color: #0f172a;
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
+  border-left: 1px solid rgba(255, 255, 255, 0.15);
+  transform: rotate(45deg);
+}
+
+.import-indicator-inner {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.import-indicator-icon {
+  color: #38bdf8;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.import-indicator-text {
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: #f1f5f9;
+}
+
+@keyframes indicator-bounce {
+  0%, 100% {
+    transform: translateX(-50%) translateY(0);
+  }
+  50% {
+    transform: translateX(-50%) translateY(4px);
+  }
 }
 
 .btn-primary {

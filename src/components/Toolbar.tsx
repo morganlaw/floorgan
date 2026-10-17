@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   MousePointer,
   Square,
@@ -16,6 +16,7 @@ import {
   Undo2,
   Redo2,
   Type,
+  Sparkles,
 } from 'lucide-react';
 import { FloorplanState, ToolMode, Unit } from '../types';
 import { TEMPLATES } from '../templates';
@@ -52,6 +53,21 @@ export const Toolbar: React.FC<Props> = ({
   canUndo,
   canRedo,
 }) => {
+  const [showImportHint, setShowImportHint] = useState(true);
+
+  useEffect(() => {
+    if (!showImportHint) return;
+
+    const handleDismiss = () => {
+      setShowImportHint(false);
+    };
+
+    window.addEventListener('pointerdown', handleDismiss, { capture: true });
+    return () => {
+      window.removeEventListener('pointerdown', handleDismiss, { capture: true });
+    };
+  }, [showImportHint]);
+
   const handleUnitToggle = (unit: Unit) => {
     setState((prev) => ({ ...prev, unit }));
   };
@@ -93,21 +109,36 @@ export const Toolbar: React.FC<Props> = ({
       {/* Brand */}
       <div className="brand">
         <span className="brand-logo">📐</span>
-        <div>
-          <h1 className="brand-title">FloorGAN</h1>
-          <span className="brand-sub">Floorplan & Furniture</span>
-        </div>
+        <h1 className="brand-title">Floorgan</h1>
       </div>
 
-      {/* Primary Feature: Import Floorplan */}
-      <button
-        className="tool-btn import-highlight-btn"
-        onClick={onOpenImportModal}
-        title="Import floorplan from image upload or website URL"
-      >
-        <ScanLine size={18} />
-        <span>Import Plan</span>
-      </button>
+      {/* Primary Feature: Parse from Floorplan */}
+      <div className="import-btn-container">
+        <button
+          className="tool-btn import-highlight-btn"
+          onClick={onOpenImportModal}
+          title="Import floorplan from image upload or website URL"
+        >
+          <ScanLine size={18} />
+          <span>Parse from floorplan</span>
+        </button>
+
+        {showImportHint && (
+          <div
+            className="import-indicator-callout"
+            onPointerDown={() => onOpenImportModal()}
+            role="tooltip"
+          >
+            <div className="import-indicator-arrow" />
+            <div className="import-indicator-inner">
+              <Sparkles size={16} className="import-indicator-icon" />
+              <div className="import-indicator-text">
+                Click here to create an interactive floorplan from an image
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
 
       <div className="divider-vertical" />
 

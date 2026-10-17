@@ -159,7 +159,7 @@ export const Sidebar: React.FC<Props> = ({
         <Search size={16} className="search-icon" />
         <input
           type="text"
-          placeholder="Search catalog (bed, desk, table, chair)..."
+          placeholder="Search catalog"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           className="search-input"
