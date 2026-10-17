@@ -163,6 +163,14 @@
   outline: none;
 }
 
+.select-dropdown-sm {
+  padding: 4px 8px;
+  font-size: 11px;
+  color: #64748b;
+  max-width: 112px;
+  height: 28px;
+}
+
 .select-dropdown:focus {
   border-color: #3b82f6;
 }
@@ -754,14 +762,21 @@ kbd {
 
 /* Toolbar Import Button Highlight */
 .import-highlight-btn {
-  background-color: #eff6ff;
-  color: #2563eb;
-  border-color: #bfdbfe;
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+  color: #ffffff;
+  border: 1px solid #1e40af;
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  border-radius: 8px;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.28);
 }
 
 .import-highlight-btn:hover {
-  background-color: #dbeafe;
-  color: #1d4ed8;
+  background: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%);
+  color: #ffffff;
+  box-shadow: 0 4px 10px rgba(37, 99, 235, 0.36);
+  transform: translateY(-0.5px);
 }
 
 .btn-primary {

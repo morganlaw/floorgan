@@ -10,9 +10,6 @@ import {
   ZoomIn,
   ZoomOut,
   RotateCcw,
-  Download,
-  Upload,
-  FileSpreadsheet,
   Trash2,
   ScanLine,
   Scaling,
@@ -22,7 +19,6 @@ import {
 } from 'lucide-react';
 import { FloorplanState, ToolMode, Unit } from '../types';
 import { TEMPLATES } from '../templates';
-import { exportToJSON, exportSVGToPNG } from '../utils/export';
 
 interface Props {
   tool: ToolMode;
@@ -92,25 +88,6 @@ export const Toolbar: React.FC<Props> = ({
     }
   };
 
-  const handleImportJSON = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const loadedState = JSON.parse(event.target?.result as string);
-        if (loadedState && Array.isArray(loadedState.walls)) {
-          setState(loadedState);
-          setSelectedId(null);
-          setSelectedType(null);
-        }
-      } catch (err) {
-        alert('Invalid floorplan JSON file.');
-      }
-    };
-    reader.readAsText(file);
-  };
-
   return (
     <header className="toolbar">
       {/* Brand */}
@@ -121,6 +98,16 @@ export const Toolbar: React.FC<Props> = ({
           <span className="brand-sub">Floorplan & Furniture</span>
         </div>
       </div>
+
+      {/* Primary Feature: Import Floorplan */}
+      <button
+        className="tool-btn import-highlight-btn"
+        onClick={onOpenImportModal}
+        title="Import floorplan from image upload or website URL"
+      >
+        <ScanLine size={18} />
+        <span>Import Plan</span>
+      </button>
 
       <div className="divider-vertical" />
 
@@ -281,67 +268,24 @@ export const Toolbar: React.FC<Props> = ({
         </button>
       </div>
 
-      <div className="divider-vertical" />
-
-      {/* Templates Selector & Floorplan Importer */}
-      <div className="tool-group">
-        <button
-          className="tool-btn import-highlight-btn"
-          onClick={onOpenImportModal}
-          title="Import floorplan from image upload or website URL"
-        >
-          <ScanLine size={17} />
-          <span>Import Plan</span>
-        </button>
-
+      {/* Right Group: Compact Template Loader & Clear */}
+      <div className="tool-group-right">
         <select
-          className="select-dropdown"
+          className="select-dropdown select-dropdown-sm"
           onChange={(e) => {
             handleTemplateLoad(e.target.value);
             e.target.value = '';
           }}
           defaultValue=""
+          title="Load starter template"
         >
           <option value="" disabled>
-            📂 Load Template...
+            Template...
           </option>
-          <option value="studio">Modern Studio Apartment</option>
-          <option value="one_bedroom">1-Bedroom Flat</option>
+          <option value="studio">Studio Apt</option>
+          <option value="one_bedroom">1-Bed Flat</option>
           <option value="clear">Clear Canvas</option>
         </select>
-      </div>
-
-      {/* Export / Import */}
-      <div className="tool-group-right">
-        <button
-          className="tool-btn"
-          onClick={() => {
-            const svg = document.getElementById('floorplan-svg') as unknown as SVGSVGElement;
-            if (svg) exportSVGToPNG(svg, 'floorgan-floorplan.png');
-          }}
-          title="Export high-resolution PNG image"
-        >
-          <Download size={16} />
-          <span>Export Image</span>
-        </button>
-
-        <button
-          className="tool-btn-icon"
-          onClick={() => exportToJSON(state, 'floorgan-floorplan.json')}
-          title="Save Project (JSON)"
-        >
-          <FileSpreadsheet size={18} />
-        </button>
-
-        <label className="tool-btn-icon cursor-pointer" title="Load Project (JSON)">
-          <Upload size={18} />
-          <input
-            type="file"
-            accept=".json"
-            style={{ display: 'none' }}
-            onChange={handleImportJSON}
-          />
-        </label>
 
         <button
           className="tool-btn-icon danger"
