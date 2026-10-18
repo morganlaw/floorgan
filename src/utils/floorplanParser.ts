@@ -642,7 +642,25 @@ function extractFineDetailAndWindowBands(
           if (yStart - dy >= 0 && hRidge[(yStart - dy) * w + x]) outerStrokes++;
           if (yLast + dy < h && hRidge[(yLast + dy) * w + x]) outerStrokes++;
         }
-        if (outerStrokes <= 2) {
+        let bgSide1 = 255;
+        let bgSide2 = 255;
+        if (yStart - 4 >= 0) {
+          bgSide1 = 0;
+          for (let dy = 4; dy <= 8; dy++) {
+            if (yStart - dy >= 0 && gray[(yStart - dy) * w + x] > bgSide1) {
+              bgSide1 = gray[(yStart - dy) * w + x];
+            }
+          }
+        }
+        if (yLast + 4 < h) {
+          bgSide2 = 0;
+          for (let dy = 4; dy <= 8; dy++) {
+            if (yLast + dy < h && gray[(yLast + dy) * w + x] > bgSide2) {
+              bgSide2 = gray[(yLast + dy) * w + x];
+            }
+          }
+        }
+        if (outerStrokes <= 2 && bgSide1 >= 205 && bgSide2 >= 205) {
           hColRuns[x].push({
             p0: yStart,
             p1: yLast,
@@ -742,7 +760,25 @@ function extractFineDetailAndWindowBands(
           if (xStart - dx >= 0 && vRidge[row + xStart - dx]) outerStrokes++;
           if (xLast + dx < w && vRidge[row + xLast + dx]) outerStrokes++;
         }
-        if (outerStrokes <= 2) {
+        let bgSide1 = 255;
+        let bgSide2 = 255;
+        if (xStart - 4 >= 0) {
+          bgSide1 = 0;
+          for (let dx = 4; dx <= 8; dx++) {
+            if (xStart - dx >= 0 && gray[row + xStart - dx] > bgSide1) {
+              bgSide1 = gray[row + xStart - dx];
+            }
+          }
+        }
+        if (xLast + 4 < w) {
+          bgSide2 = 0;
+          for (let dx = 4; dx <= 8; dx++) {
+            if (xLast + dx < w && gray[row + xLast + dx] > bgSide2) {
+              bgSide2 = gray[row + xLast + dx];
+            }
+          }
+        }
+        if (outerStrokes <= 2 && bgSide1 >= 205 && bgSide2 >= 205) {
           vRowRuns[y].push({
             p0: xStart,
             p1: xLast,
@@ -1388,6 +1424,7 @@ export function parseDimensionText(
     .replace(/[×✕＊*]/g, 'x')
     .replace(/[""״”‟]/g, '"')
     .replace(/[''′´`’‘°]/g, "'")
+    .replace(/(\d)\s*[:;]\s*(\d)/g, "$1'$2")
     .replace(/''/g, '"')
     .trim();
 
@@ -1535,6 +1572,8 @@ function matchDimensionsToPixelWalls(
   calibratedWidthMeters: number | null;
   detectedUnit: Unit | null;
   cmPerPx: number | null;
+  cmPerPxX: number | null;
+  cmPerPxY: number | null;
 } {
   if (candidates.length === 0 || rawSegmentsPx.length === 0) {
     return {
@@ -1542,13 +1581,47 @@ function matchDimensionsToPixelWalls(
       calibratedWidthMeters: null,
       detectedUnit: null,
       cmPerPx: null,
+      cmPerPxX: null,
+      cmPerPxY: null,
     };
   }
 
-  const hWalls = rawSegmentsPx.filter((s) => s.axis === 'h');
-  const vWalls = rawSegmentsPx.filter((s) => s.axis === 'v');
+  // Bridge collinear/stepped doorway gaps up to 62px wide so room rays never escape through open doorways
+  const bridgeWallGapsForRays = (segs: RawSegment[]): RawSegment[] => {
+    const out = [...segs];
+    for (let i = 0; i < segs.length; i++) {
+      const a = segs[i];
+      if (a.end - a.start < 12) continue;
+      for (let j = 0; j < segs.length; j++) {
+        if (i === j) continue;
+        const b = segs[j];
+        if (b.end - b.start < 12) continue;
+        if (Math.abs(a.pos - b.pos) <= 8 && b.start > a.end && b.start - a.end <= 62) {
+          out.push({
+            axis: a.axis,
+            pos: (a.pos + b.pos) / 2,
+            start: a.start,
+            end: b.end,
+            thickness: (a.thickness + b.thickness) / 2,
+          });
+        }
+      }
+    }
+    return out;
+  };
 
-  const verifiedScales: number[] = [];
+  const hWalls = bridgeWallGapsForRays(rawSegmentsPx.filter((s) => s.axis === 'h'));
+  const vWalls = bridgeWallGapsForRays(rawSegmentsPx.filter((s) => s.axis === 'v'));
+
+  interface VerifiedRoomScale {
+    scale: number;
+    scaleX: number;
+    scaleY: number;
+    areaPx: number;
+    diff: number;
+  }
+
+  const verifiedRooms: VerifiedRoomScale[] = [];
   const fallbackAxisScales: { idx: number; scales: number[]; spanPx?: { x1: number; y1: number; x2: number; y2: number } }[] = [];
   const prelimMatched: {
     cand: RawDimensionCandidate;
@@ -1568,6 +1641,7 @@ function matchDimensionsToPixelWalls(
       const crossMarginPx = 12;
 
       for (const hw of hWalls) {
+        if (hw.end - hw.start < 16) continue;
         if (cxPx >= hw.start - crossMarginPx && cxPx <= hw.end + crossMarginPx) {
           if (hw.pos < cyPx && (!topWall || hw.pos > topWall.pos)) {
             topWall = hw;
@@ -1585,12 +1659,16 @@ function matchDimensionsToPixelWalls(
       let rightWall: RawSegment | null = null;
 
       for (const vw of vWalls) {
-        const crossesCy = cyPx >= vw.start - crossMarginPx && cyPx <= vw.end + crossMarginPx;
+        const crossesCy =
+          vw.end - vw.start >= 16 &&
+          cyPx >= vw.start - crossMarginPx &&
+          cyPx <= vw.end + crossMarginPx;
         const overlapY = Math.min(vw.end, roomBottom) - Math.max(vw.start, roomTop);
         const isWingDivider =
           topWall !== null &&
           bottomWall !== null &&
-          overlapY >= (roomBottom - roomTop) * 0.22;
+          vw.end - vw.start >= 32 &&
+          overlapY >= (roomBottom - roomTop) * 0.25;
 
         if (crossesCy || isWingDivider) {
           if (vw.pos < cxPx && (!leftWall || vw.pos > leftWall.pos)) {
@@ -1633,11 +1711,11 @@ function matchDimensionsToPixelWalls(
         const swappedDiff =
           Math.abs(swappedRatioX - swappedRatioY) / Math.max(swappedRatioX, swappedRatioY);
 
-        const bestDiff = Math.min(directDiff, swappedDiff);
-        const avgScale =
-          directDiff <= swappedDiff
-            ? (directRatioX + directRatioY) / 2
-            : (swappedRatioX + swappedRatioY) / 2;
+        const useSwapped = directDiff > 0.14 && swappedDiff < directDiff * 0.55;
+        const bestDiff = useSwapped ? swappedDiff : directDiff;
+        const scaleX = useSwapped ? swappedRatioX : directRatioX;
+        const scaleY = useSwapped ? swappedRatioY : directRatioY;
+        const avgScale = (scaleX + scaleY) / 2;
 
         const spanBox = {
           x1: leftX!,
@@ -1647,7 +1725,13 @@ function matchDimensionsToPixelWalls(
         };
 
         if (bestDiff < 0.25 && avgScale >= 0.2 && avgScale <= 15) {
-          verifiedScales.push(avgScale);
+          verifiedRooms.push({
+            scale: avgScale,
+            scaleX,
+            scaleY,
+            areaPx: roomW * roomH,
+            diff: bestDiff,
+          });
           prelimMatched.push({
             cand,
             matchedSpanPx: spanBox,
@@ -1704,7 +1788,13 @@ function matchDimensionsToPixelWalls(
         const lenPx = bestWall.end - bestWall.start;
         const scale = cand.val1Cm / lenPx;
         if (scale >= 0.2 && scale <= 15) {
-          verifiedScales.push(scale);
+          verifiedRooms.push({
+            scale,
+            scaleX: scale,
+            scaleY: scale,
+            areaPx: lenPx * lenPx * 0.5,
+            diff: 0.05,
+          });
           prelimMatched.push({
             cand,
             matchedSpanPx:
@@ -1722,11 +1812,37 @@ function matchDimensionsToPixelWalls(
   }
 
   let medianCmPerPx: number | null = null;
-  if (verifiedScales.length > 0) {
-    const sorted = [...verifiedScales].sort((a, b) => a - b);
-    const mid = Math.floor(sorted.length / 2);
-    medianCmPerPx =
-      sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  let cmPerPxX: number | null = null;
+  let cmPerPxY: number | null = null;
+
+  if (verifiedRooms.length > 0) {
+    // Anchor on the largest verified room and weight by (areaPx^2) / (0.005 + diff^2)
+    // so large primary rooms with tight X/Y agreement dominate over small utility rooms
+    const largestRoom = verifiedRooms.reduce((a, b) => (b.areaPx > a.areaPx ? b : a));
+    const inliers = verifiedRooms.filter(
+      (r) => Math.abs(r.scale - largestRoom.scale) / largestRoom.scale <= 0.18
+    );
+    const activeRooms = inliers.length > 0 ? inliers : verifiedRooms;
+
+    let sumW = 0;
+    let sumScale = 0;
+    let sumScaleX = 0;
+    let sumScaleY = 0;
+    for (const r of activeRooms) {
+      const w = (r.areaPx * r.areaPx) / (0.005 + r.diff * r.diff);
+      sumW += w;
+      sumScale += r.scale * w;
+      sumScaleX += r.scaleX * w;
+      sumScaleY += r.scaleY * w;
+    }
+    medianCmPerPx = sumScale / sumW;
+    cmPerPxX = sumScaleX / sumW;
+    cmPerPxY = sumScaleY / sumW;
+
+    if (Math.abs(cmPerPxX - cmPerPxY) / medianCmPerPx > 0.12) {
+      cmPerPxX = medianCmPerPx;
+      cmPerPxY = medianCmPerPx;
+    }
 
     // Resolve any open-plan rooms where one axis matched the consensus scale
     for (const fb of fallbackAxisScales) {
@@ -1749,26 +1865,30 @@ function matchDimensionsToPixelWalls(
     if (allScales.length > 0) {
       const mid = Math.floor(allScales.length / 2);
       medianCmPerPx = allScales[mid];
+      cmPerPxX = medianCmPerPx;
+      cmPerPxY = medianCmPerPx;
     }
   }
 
+  const effectiveScaleX = cmPerPxX ?? medianCmPerPx;
   const calibratedWidthMeters =
-    medianCmPerPx !== null
-      ? Math.round(((spanPxW * medianCmPerPx) / 100) * 100) / 100
+    effectiveScaleX !== null
+      ? Math.round(((spanPxW * effectiveScaleX) / 100) * 100) / 100
       : null;
 
   const detectedUnit: Unit | null =
     candidates.length > 0 ? candidates[0].unit : null;
 
-  const finalScale = medianCmPerPx || 1;
+  const finalScaleX = cmPerPxX || medianCmPerPx || 1;
+  const finalScaleY = cmPerPxY || medianCmPerPx || 1;
   const matched: DetectedDimension[] = prelimMatched.map((item) => ({
     rawText: item.cand.rawText,
     kind: item.cand.kind,
     unit: item.cand.unit,
     widthCm: item.cand.val1Cm,
     heightCm: item.cand.val2Cm,
-    xCm: Math.round(item.cand.cxPx * finalScale + ORIGIN_OFFSET_X),
-    yCm: Math.round(item.cand.cyPx * finalScale + ORIGIN_OFFSET_Y),
+    xCm: Math.round(item.cand.cxPx * finalScaleX + ORIGIN_OFFSET_X),
+    yCm: Math.round(item.cand.cyPx * finalScaleY + ORIGIN_OFFSET_Y),
     matchedSpanPx: item.matchedSpanPx,
     impliedCmPerPx: item.impliedCmPerPx,
   }));
@@ -1778,6 +1898,8 @@ function matchDimensionsToPixelWalls(
     calibratedWidthMeters,
     detectedUnit,
     cmPerPx: medianCmPerPx,
+    cmPerPxX,
+    cmPerPxY,
   };
 }
 
@@ -1924,7 +2046,9 @@ export function regularizeFloorplanGraph(
   cmPerPx: number,
   _minWallLengthCm: number,
   detectOpenings: boolean,
-  winBandsCm: RawSegment[] = []
+  winBandsCm: RawSegment[] = [],
+  cmPerPxX: number = cmPerPx,
+  cmPerPxY: number = cmPerPx
 ): { walls: Wall[]; doors: Door[]; windows: WindowItem[] } {
   const pxToCm = (px: number) => Math.round(px * cmPerPx);
   const collinearToleranceCm = Math.max(4, Math.round(cmPerPx * 2.5));
@@ -1981,10 +2105,15 @@ export function regularizeFloorplanGraph(
       const span = hi - lo;
       if (span <= pxToCm(25)) return true;
       const perpList = perpAxis === 'v' ? vSegs : hSegs;
-      return perpList.some((p) => {
+      let totalOverlap = 0;
+      for (const p of perpList) {
         const overlap = Math.min(p.end, hi) - Math.max(p.start, lo);
-        return overlap >= span * 0.5;
-      });
+        if (overlap > 0) {
+          if (overlap >= span * 0.45) return true;
+          totalOverlap += overlap;
+        }
+      }
+      return totalOverlap >= span * 0.45;
     };
 
     if (axis === 'h') {
@@ -2043,9 +2172,11 @@ export function regularizeFloorplanGraph(
     if (!rawBinaryMask || cmPerPx <= 0) return false;
     if (!isExteriorSpan(axis, posCm, startCm, endCm)) return false;
 
-    const pxPos = Math.round(posCm / cmPerPx);
-    const pxStart = Math.round(Math.min(startCm, endCm) / cmPerPx);
-    const pxEnd = Math.round(Math.max(startCm, endCm) / cmPerPx);
+    const posScale = axis === 'h' ? cmPerPxY : cmPerPxX;
+    const spanScale = axis === 'h' ? cmPerPxX : cmPerPxY;
+    const pxPos = Math.round(posCm / posScale);
+    const pxStart = Math.round(Math.min(startCm, endCm) / spanScale);
+    const pxEnd = Math.round(Math.max(startCm, endCm) / spanScale);
     const span = pxEnd - pxStart;
     if (span < 12) return false;
 
@@ -2118,9 +2249,11 @@ export function regularizeFloorplanGraph(
     endCm: number
   ): boolean {
     if (!rawBinaryMask || cmPerPx <= 0) return true;
-    const pxPos = Math.round(posCm / cmPerPx);
-    const pxStart = Math.round(Math.min(startCm, endCm) / cmPerPx);
-    const pxEnd = Math.round(Math.max(startCm, endCm) / cmPerPx);
+    const posScale = axis === 'h' ? cmPerPxY : cmPerPxX;
+    const spanScale = axis === 'h' ? cmPerPxX : cmPerPxY;
+    const pxPos = Math.round(posCm / posScale);
+    const pxStart = Math.round(Math.min(startCm, endCm) / spanScale);
+    const pxEnd = Math.round(Math.max(startCm, endCm) / spanScale);
     const span = pxEnd - pxStart;
     if (span < 10) return false;
 
@@ -2173,9 +2306,11 @@ export function regularizeFloorplanGraph(
     allowMullionGapPx = 0
   ): { startCm: number; endCm: number } {
     if (!structuralMask || cmPerPx <= 0) return { startCm, endCm };
-    const pxPos = Math.round(posCm / cmPerPx);
-    let pxStart = Math.round(startCm / cmPerPx);
-    let pxEnd = Math.round(endCm / cmPerPx);
+    const posScale = axis === 'h' ? cmPerPxY : cmPerPxX;
+    const spanScale = axis === 'h' ? cmPerPxX : cmPerPxY;
+    const pxPos = Math.round(posCm / posScale);
+    let pxStart = Math.round(startCm / spanScale);
+    let pxEnd = Math.round(endCm / spanScale);
     const maxPierPx = 64;
 
     const hasStructAt = (t: number): boolean => {
@@ -2219,8 +2354,8 @@ export function regularizeFloorplanGraph(
     }
 
     return {
-      startCm: pxStart < Math.round(startCm / cmPerPx) ? pxStart * cmPerPx : startCm,
-      endCm: pxEnd > Math.round(endCm / cmPerPx) ? pxEnd * cmPerPx : endCm,
+      startCm: pxStart < Math.round(startCm / spanScale) ? pxStart * spanScale : startCm,
+      endCm: pxEnd > Math.round(endCm / spanScale) ? pxEnd * spanScale : endCm,
     };
   }
 
@@ -3052,6 +3187,69 @@ export function regularizeFloorplanGraph(
         });
       }
     }
+
+    // Bridge any remaining collinear doorway gaps (such as doorways between a solid wall and a newly integrated exterior window wall)
+    const bridgeRemainingDoorwayGaps = (list: RawSegment[], axis: 'h' | 'v') => {
+      const maxPosDiff = pxToCm(5);
+      let changed = true;
+      while (changed) {
+        changed = false;
+        list.sort((a, b) => a.pos - b.pos || a.start - b.start);
+        for (let i = 0; i < list.length && !changed; i++) {
+          for (let j = 0; j < list.length && !changed; j++) {
+            if (i === j) continue;
+            const a = list[i];
+            const b = list[j];
+            if (Math.abs(a.pos - b.pos) > maxPosDiff) continue;
+            if (b.start < a.end - smallGapBridgeCm) continue;
+            const gapWidth = b.start - a.end;
+            const lenA = Math.max(1, a.end - a.start);
+            const lenB = Math.max(1, b.end - b.start);
+            const avgPos = Math.round((a.pos * lenA + b.pos * lenB) / (lenA + lenB));
+            if (gapWidth <= smallGapBridgeCm) {
+              a.pos = avgPos;
+              a.start = Math.min(a.start, b.start);
+              a.end = Math.max(a.end, b.end);
+              list.splice(j, 1);
+              changed = true;
+            } else if (
+              gapWidth >= minOpeningWidthCm &&
+              gapWidth <= maxDoorWidthCm &&
+              !hasWindowBandInRawMask(axis, avgPos, a.end, b.start) &&
+              hasDoorSignatureInRawMask(axis, avgPos, a.end, b.start)
+            ) {
+              const gapCenter = Math.round((a.end + b.start) / 2);
+              const alreadyHasDoor = doors.some((d) => {
+                const dPos = axis === 'h' ? d.y - ORIGIN_OFFSET_Y : d.x - ORIGIN_OFFSET_X;
+                const dCenter = axis === 'h' ? d.x - ORIGIN_OFFSET_X : d.y - ORIGIN_OFFSET_Y;
+                return (
+                  Math.abs(dPos - avgPos) <= pxToCm(12) &&
+                  Math.abs(dCenter - gapCenter) <= gapWidth * 0.6
+                );
+              });
+              if (!alreadyHasDoor) {
+                doors.push({
+                  id: `door_imp_${doors.length + 1}_${Date.now().toString(36)}`,
+                  x: Math.round((axis === 'h' ? gapCenter : avgPos) + ORIGIN_OFFSET_X),
+                  y: Math.round((axis === 'h' ? avgPos : gapCenter) + ORIGIN_OFFSET_Y),
+                  width: formatDoorWidth(gapWidth),
+                  rotation: axis === 'h' ? 0 : 90,
+                  swingDirection: 'left',
+                });
+              }
+              a.pos = avgPos;
+              a.start = Math.min(a.start, b.start);
+              a.end = Math.max(a.end, b.end);
+              list.splice(j, 1);
+              changed = true;
+            }
+          }
+        }
+      }
+    };
+
+    bridgeRemainingDoorwayGaps(cleanH, 'h');
+    bridgeRemainingDoorwayGaps(cleanV, 'v');
   }
 
   // Snap orthogonal L-corners and T-junctions between cleanH and cleanV
@@ -3219,12 +3417,14 @@ export function parseFloorplanImage(
     }
   }
 
-  // Step 3: Optional double-line closing (smartly ignores periodic shelf/stair combs)
+  // Step 3: Optional double-line closing (only when structural walls are thin/hollow < 5px;
+  // when walls are already solid >= 5px Poché, skipping prevents filling 1px gaps inside hollow door leaves)
   const preCloseThickPx = estimateStructuralWallThickness(ccCleanedMask, w, h);
-  const closeGapPx = preCloseThickPx >= 5 ? 1 : Math.max(3, options.minWallThicknessPx);
-  const closedMask = options.closeHollowWalls
-    ? closeDoubleLineGaps(ccCleanedMask, w, h, closeGapPx)
-    : ccCleanedMask;
+  const closeGapPx = Math.max(3, options.minWallThicknessPx);
+  const closedMask =
+    options.closeHollowWalls && preCloseThickPx < 5
+      ? closeDoubleLineGaps(ccCleanedMask, w, h, closeGapPx)
+      : ccCleanedMask;
 
   // Step 4: Auto-adapt erosion kernel to structural wall thickness so thin 1-2px fixture lines
   // (toilets, sinks, bathtubs, counters, door arcs, closet shelves) attached to walls are stripped while walls survive
@@ -3308,21 +3508,35 @@ export function parseFloorplanImage(
     useOcrScale && ocrMatch.cmPerPx !== null
       ? ocrMatch.cmPerPx
       : targetWidthCm / spanPxW;
+  const cmPerPxX =
+    useOcrScale && ocrMatch.cmPerPxX !== null
+      ? ocrMatch.cmPerPxX
+      : cmPerPx;
+  const cmPerPxY =
+    useOcrScale && ocrMatch.cmPerPxY !== null
+      ? ocrMatch.cmPerPxY
+      : cmPerPx;
 
   const segmentsCm: RawSegment[] = rawSegmentsPx.map((s) => ({
     axis: s.axis,
-    pos: s.pos * cmPerPx,
-    start: s.start * cmPerPx,
-    end: s.end * cmPerPx,
-    thickness: Math.max(10, Math.min(25, Math.round(s.thickness * cmPerPx))),
+    pos: s.pos * (s.axis === 'h' ? cmPerPxY : cmPerPxX),
+    start: s.start * (s.axis === 'h' ? cmPerPxX : cmPerPxY),
+    end: s.end * (s.axis === 'h' ? cmPerPxX : cmPerPxY),
+    thickness: Math.max(
+      10,
+      Math.min(25, Math.round(s.thickness * (s.axis === 'h' ? cmPerPxY : cmPerPxX)))
+    ),
   }));
 
   const winBandsCm: RawSegment[] = winBandsPx.map((s) => ({
     axis: s.axis,
-    pos: s.pos * cmPerPx,
-    start: s.start * cmPerPx,
-    end: s.end * cmPerPx,
-    thickness: Math.max(12, Math.min(20, Math.round(s.thickness * cmPerPx))),
+    pos: s.pos * (s.axis === 'h' ? cmPerPxY : cmPerPxX),
+    start: s.start * (s.axis === 'h' ? cmPerPxX : cmPerPxY),
+    end: s.end * (s.axis === 'h' ? cmPerPxX : cmPerPxY),
+    thickness: Math.max(
+      12,
+      Math.min(20, Math.round(s.thickness * (s.axis === 'h' ? cmPerPxY : cmPerPxX)))
+    ),
   }));
 
   const { walls, doors, windows } = regularizeFloorplanGraph(
@@ -3334,13 +3548,15 @@ export function parseFloorplanImage(
     cmPerPx,
     options.minWallLengthCm,
     options.detectOpenings,
-    winBandsCm
+    winBandsCm,
+    cmPerPxX,
+    cmPerPxY
   );
 
   const detectedDimensions: DetectedDimension[] = ocrMatch.matched.map((d, idx) => ({
     ...d,
-    xCm: Math.round(ocrCandidates[idx].cxPx * cmPerPx + ORIGIN_OFFSET_X),
-    yCm: Math.round(ocrCandidates[idx].cyPx * cmPerPx + ORIGIN_OFFSET_Y),
+    xCm: Math.round(ocrCandidates[idx].cxPx * cmPerPxX + ORIGIN_OFFSET_X),
+    yCm: Math.round(ocrCandidates[idx].cyPx * cmPerPxY + ORIGIN_OFFSET_Y),
   }));
 
   // Visual morphological mask preview (navy = kept structural walls, light gray = stripped text/toilets/sinks)
@@ -3381,8 +3597,8 @@ export function parseFloorplanImage(
     computedThreshold,
     originOffset: { x: ORIGIN_OFFSET_X, y: ORIGIN_OFFSET_Y },
     boundsCm: {
-      width: Math.round(w * cmPerPx),
-      height: Math.round(h * cmPerPx),
+      width: Math.round(w * cmPerPxX),
+      height: Math.round(h * cmPerPxY),
     },
     detectedDimensions,
     autoCalibratedWidthMeters: ocrMatch.calibratedWidthMeters,

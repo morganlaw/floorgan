@@ -68,7 +68,7 @@ const polygonArea = (pts: Point[]) => {
 const formatArea = (cm2: number, unit: Unit) =>
   unit === 'm' ? `${(cm2 / 10000).toFixed(2)} m²` : `${(cm2 / 929.0304).toFixed(1)} ft²`;
 
-/** Unit-aware numeric input that allows free typing and commits valid values in cm. */
+/** Unit-aware numeric input that allows smooth typing and commits valid values in cm. */
 const DimInput: React.FC<{
   label: string;
   valueCm: number;
@@ -76,23 +76,68 @@ const DimInput: React.FC<{
   onChange: (cm: number) => void;
 }> = ({ label, valueCm, unit, onChange }) => {
   const [draft, setDraft] = useState<string | null>(null);
+
+  const displayVal = cmToUnit(valueCm, unit);
+  const formattedVal = displayVal.toFixed(2);
+
+  const commitValue = (raw: string) => {
+    const clean = raw.trim().replace(',', '.');
+    const v = parseFloat(clean);
+    if (!isNaN(v) && v > 0) {
+      const cm = unitToCm(v, unit);
+      onChange(Math.max(MIN_SIZE, Math.round(cm * 10) / 10));
+    }
+    setDraft(null);
+  };
+
   return (
     <div className="field-group flex-1">
       <label className="field-label">
         {label} ({unit})
       </label>
       <input
-        type="number"
-        min="0"
-        step={unit === 'm' ? 0.05 : 0.25}
+        type="text"
+        inputMode="decimal"
         className="field-input"
-        value={draft ?? cmToUnit(valueCm, unit).toFixed(2)}
-        onChange={(e) => {
-          setDraft(e.target.value);
-          const v = parseFloat(e.target.value);
-          if (!isNaN(v) && v > 0) onChange(Math.max(MIN_SIZE, unitToCm(v, unit)));
+        value={draft !== null ? draft : formattedVal}
+        onFocus={() => {
+          setDraft(formattedVal);
         }}
-        onBlur={() => setDraft(null)}
+        onChange={(e) => {
+          const val = e.target.value;
+          setDraft(val);
+          const clean = val.trim().replace(',', '.');
+          const v = parseFloat(clean);
+          if (!isNaN(v) && v > 0 && !val.endsWith('.') && !val.endsWith(',')) {
+            const cm = unitToCm(v, unit);
+            onChange(Math.max(MIN_SIZE, Math.round(cm * 10) / 10));
+          }
+        }}
+        onBlur={(e) => {
+          commitValue(e.target.value);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            commitValue(e.currentTarget.value);
+            e.currentTarget.blur();
+          } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            const step = unit === 'm' ? 0.05 : 0.25;
+            const current = parseFloat((draft ?? formattedVal).replace(',', '.')) || displayVal;
+            const next = current + step;
+            const cm = unitToCm(next, unit);
+            onChange(Math.max(MIN_SIZE, Math.round(cm * 10) / 10));
+            setDraft(next.toFixed(2));
+          } else if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            const step = unit === 'm' ? 0.05 : 0.25;
+            const current = parseFloat((draft ?? formattedVal).replace(',', '.')) || displayVal;
+            const next = Math.max(cmToUnit(MIN_SIZE, unit), current - step);
+            const cm = unitToCm(next, unit);
+            onChange(Math.max(MIN_SIZE, Math.round(cm * 10) / 10));
+            setDraft(next.toFixed(2));
+          }
+        }}
       />
     </div>
   );
@@ -396,11 +441,11 @@ export const CustomObjectCreator: React.FC<Props> = ({
   };
 
   const setWidthLocked = (cm: number) => {
-    if (lockAspect) setDepth(cm * (depth / width));
+    if (lockAspect && width > 0) setDepth(Math.round(cm * (depth / width) * 10) / 10);
     setWidth(cm);
   };
   const setDepthLocked = (cm: number) => {
-    if (lockAspect) setWidth(cm * (width / depth));
+    if (lockAspect && depth > 0) setWidth(Math.round(cm * (width / depth) * 10) / 10);
     setDepth(cm);
   };
 
@@ -410,6 +455,59 @@ export const CustomObjectCreator: React.FC<Props> = ({
     const n = normalizePolygon(verts);
     return { width: n.width, depth: n.depth, area: verts.length >= 3 ? polygonArea(verts) : 0 };
   }, [verts]);
+
+  const scalePoly = (newW: number, newD: number) => {
+    if (!verts.length) return;
+    const xs = verts.map((p) => p.x);
+    const ys = verts.map((p) => p.y);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    const curW = Math.max(maxX - minX, 0.01);
+    const curD = Math.max(maxY - minY, 0.01);
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+
+    const sx = newW / curW;
+    const sy = newD / curD;
+
+    const newVerts = verts.map((p) => ({
+      x: cx + (p.x - cx) * sx,
+      y: cy + (p.y - cy) * sy,
+    }));
+
+    // Auto expand workspace if necessary to prevent vertices going out of bounds
+    const requiredW = Math.max(...newVerts.map((p) => Math.abs(p.x - ws.w / 2))) * 2 * 1.15;
+    const requiredH = Math.max(...newVerts.map((p) => Math.abs(p.y - ws.h / 2))) * 2 * 1.15;
+    const idx = WORKSPACES.findIndex((w) => w.w >= requiredW && w.h >= requiredH);
+    if (idx !== -1 && idx > wsIdx) {
+      setWsIdx(idx);
+    }
+
+    pushHistory();
+    setVerts(newVerts);
+    setWidth(newW);
+    setDepth(newD);
+  };
+
+  const handleScalePolyWidth = (newW: number) => {
+    if (!polyInfo || polyInfo.width <= 0) {
+      setWidth(newW);
+      return;
+    }
+    const newD = lockAspect ? (newW * polyInfo.depth) / polyInfo.width : polyInfo.depth;
+    scalePoly(newW, newD);
+  };
+
+  const handleScalePolyDepth = (newD: number) => {
+    if (!polyInfo || polyInfo.depth <= 0) {
+      setDepth(newD);
+      return;
+    }
+    const newW = lockAspect ? (newD * polyInfo.width) / polyInfo.depth : polyInfo.width;
+    scalePoly(newW, newD);
+  };
 
   const shapeLabel = BASIC_SHAPES.find((s) => s.id === shape)?.label ?? 'Shape';
   const canSaveAdvanced =
@@ -524,13 +622,24 @@ export const CustomObjectCreator: React.FC<Props> = ({
               <div className="segmented-control creator-mode-toggle">
                 <button
                   className={`segment-btn ${mode === 'basic' ? 'active' : ''}`}
-                  onClick={() => setMode('basic')}
+                  onClick={() => {
+                    if (polyInfo) {
+                      setWidth(Math.round(polyInfo.width * 10) / 10);
+                      setDepth(Math.round(polyInfo.depth * 10) / 10);
+                    }
+                    setMode('basic');
+                  }}
                 >
                   <Shapes size={13} /> Basic
                 </button>
                 <button
                   className={`segment-btn ${mode === 'advanced' ? 'active' : ''}`}
-                  onClick={() => setMode('advanced')}
+                  onClick={() => {
+                    if (verts.length === 0) {
+                      loadTemplate(shape);
+                    }
+                    setMode('advanced');
+                  }}
                 >
                   <PenTool size={13} /> Advanced
                 </button>
@@ -631,6 +740,33 @@ export const CustomObjectCreator: React.FC<Props> = ({
                   <button className="btn-secondary w-full" onClick={closeShape} disabled={n < 3}>
                     <Check size={14} /> Close shape
                   </button>
+                )}
+
+                {polyInfo && (
+                  <div className="field-group">
+                    <label className="field-label">Dimensions</label>
+                    <div className="field-row creator-dims-row">
+                      <DimInput
+                        label="Width"
+                        valueCm={polyInfo.width}
+                        unit={unit}
+                        onChange={handleScalePolyWidth}
+                      />
+                      <button
+                        className={`tool-btn-icon creator-lock-btn ${lockAspect ? 'active' : ''}`}
+                        onClick={() => setLockAspect((l) => !l)}
+                        title={lockAspect ? 'Unlock aspect ratio' : 'Lock aspect ratio'}
+                      >
+                        {lockAspect ? <Lock size={14} /> : <Unlock size={14} />}
+                      </button>
+                      <DimInput
+                        label="Depth"
+                        valueCm={polyInfo.depth}
+                        unit={unit}
+                        onChange={handleScalePolyDepth}
+                      />
+                    </div>
+                  </div>
                 )}
 
                 <div className="stats-box">

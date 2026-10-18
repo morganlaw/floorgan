@@ -107,6 +107,23 @@ export const Sidebar: React.FC<Props> = ({
         ? prev.map((i) => (i.catalogId === item.catalogId ? item : i))
         : [...prev, item]
     );
+    // Also update existing placed items on the floorplan canvas if this custom item was edited
+    setState((prev) => ({
+      ...prev,
+      furniture: prev.furniture.map((f) =>
+        f.catalogId === item.catalogId
+          ? {
+              ...f,
+              name: item.name,
+              color: item.color,
+              width: item.width,
+              depth: item.depth,
+              ...(item.shape ? { shape: item.shape } : {}),
+              ...(item.points ? { points: item.points.map((p) => ({ ...p })) } : {}),
+            }
+          : f
+      ),
+    }));
     setCreatorOpen(false);
     setEditingItem(null);
     setSelectedCategory('custom');

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   RotateCw,
   Copy,
@@ -18,9 +18,80 @@ import {
   X,
   Layers,
 } from 'lucide-react';
-import { CustomShapeKind, FloorplanState, PlacedFurniture, SelectedElementType, TextBoxItem, ToolMode } from '../types';
+import { CustomShapeKind, FloorplanState, PlacedFurniture, SelectedElementType, TextBoxItem, ToolMode, Unit } from '../types';
 import { formatDimension, distance } from '../utils/geometry';
 import { BASIC_SHAPES } from '../utils/shapes';
+
+const PropDimInput: React.FC<{
+  label: string;
+  valueCm: number;
+  unit: Unit;
+  minCm?: number;
+  onChange: (cm: number) => void;
+}> = ({ label, valueCm, unit, minCm = 5, onChange }) => {
+  const [draft, setDraft] = useState<string | null>(null);
+
+  const displayVal = unit === 'm' ? valueCm / 100 : valueCm / 30.48;
+  const formattedVal = displayVal.toFixed(2);
+
+  const commit = (raw: string) => {
+    const clean = raw.trim().replace(',', '.');
+    const v = parseFloat(clean);
+    if (!isNaN(v) && v > 0) {
+      const cm = unit === 'm' ? v * 100 : v * 30.48;
+      onChange(Math.max(minCm, Math.round(cm)));
+    }
+    setDraft(null);
+  };
+
+  return (
+    <div className="field-group flex-1">
+      <label className="field-label">
+        {label} ({unit})
+      </label>
+      <input
+        type="text"
+        inputMode="decimal"
+        className="field-input"
+        value={draft !== null ? draft : formattedVal}
+        onFocus={() => setDraft(formattedVal)}
+        onChange={(e) => {
+          const val = e.target.value;
+          setDraft(val);
+          const clean = val.trim().replace(',', '.');
+          const v = parseFloat(clean);
+          if (!isNaN(v) && v > 0 && !val.endsWith('.') && !val.endsWith(',')) {
+            const cm = unit === 'm' ? v * 100 : v * 30.48;
+            onChange(Math.max(minCm, Math.round(cm)));
+          }
+        }}
+        onBlur={(e) => commit(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            commit(e.currentTarget.value);
+            e.currentTarget.blur();
+          } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            const step = unit === 'm' ? 0.05 : 0.25;
+            const cur = parseFloat((draft ?? formattedVal).replace(',', '.')) || displayVal;
+            const next = cur + step;
+            const cm = unit === 'm' ? next * 100 : next * 30.48;
+            onChange(Math.max(minCm, Math.round(cm)));
+            setDraft(next.toFixed(2));
+          } else if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            const step = unit === 'm' ? 0.05 : 0.25;
+            const cur = parseFloat((draft ?? formattedVal).replace(',', '.')) || displayVal;
+            const next = Math.max(unit === 'm' ? minCm / 100 : minCm / 30.48, cur - step);
+            const cm = unit === 'm' ? next * 100 : next * 30.48;
+            onChange(Math.max(minCm, Math.round(cm)));
+            setDraft(next.toFixed(2));
+          }
+        }}
+      />
+    </div>
+  );
+};
 
 interface Props {
   state: FloorplanState;
@@ -507,48 +578,20 @@ export const PropertiesPanel: React.FC<Props> = ({
 
           {/* Dimensions */}
           <div className="field-row">
-            <div className="field-group flex-1">
-              <label className="field-label">Width ({state.unit})</label>
-              <input
-                type="number"
-                min="20"
-                step="5"
-                value={
-                  state.unit === 'm'
-                    ? (selectedFurniture.width / 100).toFixed(2)
-                    : (selectedFurniture.width / 2.54 / 12).toFixed(1)
-                }
-                onChange={(e) => {
-                  const val = parseFloat(e.target.value);
-                  if (!isNaN(val) && val > 0) {
-                    const cm = state.unit === 'm' ? val * 100 : val * 12 * 2.54;
-                    updateFurniture({ width: Math.round(cm) });
-                  }
-                }}
-                className="field-input"
-              />
-            </div>
-            <div className="field-group flex-1">
-              <label className="field-label">Depth ({state.unit})</label>
-              <input
-                type="number"
-                min="20"
-                step="5"
-                value={
-                  state.unit === 'm'
-                    ? (selectedFurniture.depth / 100).toFixed(2)
-                    : (selectedFurniture.depth / 2.54 / 12).toFixed(1)
-                }
-                onChange={(e) => {
-                  const val = parseFloat(e.target.value);
-                  if (!isNaN(val) && val > 0) {
-                    const cm = state.unit === 'm' ? val * 100 : val * 12 * 2.54;
-                    updateFurniture({ depth: Math.round(cm) });
-                  }
-                }}
-                className="field-input"
-              />
-            </div>
+            <PropDimInput
+              label="Width"
+              valueCm={selectedFurniture.width}
+              unit={state.unit}
+              minCm={10}
+              onChange={(w) => updateFurniture({ width: w })}
+            />
+            <PropDimInput
+              label="Depth"
+              valueCm={selectedFurniture.depth}
+              unit={state.unit}
+              minCm={10}
+              onChange={(d) => updateFurniture({ depth: d })}
+            />
           </div>
 
           {/* Rotation Control */}
@@ -810,48 +853,20 @@ export const PropertiesPanel: React.FC<Props> = ({
               </button>
             </div>
             <div className="field-row">
-              <div className="field-group flex-1">
-                <label className="field-label">Width ({state.unit})</label>
-                <input
-                  type="number"
-                  min="20"
-                  step={state.unit === 'm' ? '0.05' : '0.25'}
-                  value={
-                    state.unit === 'm'
-                      ? (selectedTextBox.width / 100).toFixed(2)
-                      : (selectedTextBox.width / 2.54 / 12).toFixed(1)
-                  }
-                  onChange={(e) => {
-                    const val = parseFloat(e.target.value);
-                    if (!isNaN(val) && val > 0) {
-                      const cm = state.unit === 'm' ? val * 100 : val * 12 * 2.54;
-                      updateTextBox({ width: Math.round(cm) });
-                    }
-                  }}
-                  className="field-input"
-                />
-              </div>
-              <div className="field-group flex-1">
-                <label className="field-label">Height ({state.unit})</label>
-                <input
-                  type="number"
-                  min="15"
-                  step={state.unit === 'm' ? '0.05' : '0.25'}
-                  value={
-                    state.unit === 'm'
-                      ? (selectedTextBox.height / 100).toFixed(2)
-                      : (selectedTextBox.height / 2.54 / 12).toFixed(1)
-                  }
-                  onChange={(e) => {
-                    const val = parseFloat(e.target.value);
-                    if (!isNaN(val) && val > 0) {
-                      const cm = state.unit === 'm' ? val * 100 : val * 12 * 2.54;
-                      updateTextBox({ height: Math.round(cm) });
-                    }
-                  }}
-                  className="field-input"
-                />
-              </div>
+              <PropDimInput
+                label="Width"
+                valueCm={selectedTextBox.width}
+                unit={state.unit}
+                minCm={15}
+                onChange={(w) => updateTextBox({ width: w })}
+              />
+              <PropDimInput
+                label="Height"
+                valueCm={selectedTextBox.height}
+                unit={state.unit}
+                minCm={15}
+                onChange={(h) => updateTextBox({ height: h })}
+              />
             </div>
             {/* Quick Size Presets */}
             <div className="flex gap-1 mt-1">
