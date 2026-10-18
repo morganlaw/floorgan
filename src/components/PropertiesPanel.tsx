@@ -9,9 +9,6 @@ import {
   Eye,
   EyeOff,
   Ruler,
-  AlignLeft,
-  AlignCenter,
-  AlignRight,
   Bold,
   Italic,
   Type,
@@ -736,39 +733,11 @@ export const PropertiesPanel: React.FC<Props> = ({
             </div>
           </div>
 
-          {/* Alignment */}
-          <div className="field-group">
-            <label className="field-label">Alignment</label>
-            <div className="segmented-control">
-              <button
-                className={`segment-btn flex-1 ${(selectedTextBox.textAlign || 'center') === 'left' ? 'active' : ''}`}
-                onClick={() => updateTextBox({ textAlign: 'left' })}
-                title="Align Left"
-              >
-                <AlignLeft size={14} />
-              </button>
-              <button
-                className={`segment-btn flex-1 ${(selectedTextBox.textAlign || 'center') === 'center' ? 'active' : ''}`}
-                onClick={() => updateTextBox({ textAlign: 'center' })}
-                title="Align Center"
-              >
-                <AlignCenter size={14} />
-              </button>
-              <button
-                className={`segment-btn flex-1 ${(selectedTextBox.textAlign || 'center') === 'right' ? 'active' : ''}`}
-                onClick={() => updateTextBox({ textAlign: 'right' })}
-                title="Align Right"
-              >
-                <AlignRight size={14} />
-              </button>
-            </div>
-          </div>
-
           {/* Text Color */}
           <div className="field-group">
             <label className="field-label">Text Color</label>
             <div className="color-palette">
-              {['#0f172a', '#475569', '#2563eb', '#0284c7', '#0f766e', '#16a34a', '#b45309', '#dc2626', '#ffffff'].map((c) => (
+              {['#0f172a', '#475569', '#2563eb', '#0f766e', '#16a34a', '#dc2626', '#ffffff'].map((c) => (
                 <button
                   key={c}
                   className={`color-swatch ${selectedTextBox.color === c ? 'selected' : ''}`}
@@ -781,7 +750,7 @@ export const PropertiesPanel: React.FC<Props> = ({
 
           {/* Background Fill */}
           <div className="field-group">
-            <label className="field-label">Background Card</label>
+            <label className="field-label">Background</label>
             <div className="color-palette">
               {[
                 { c: 'transparent', label: 'None' },
@@ -789,7 +758,6 @@ export const PropertiesPanel: React.FC<Props> = ({
                 { c: '#fef08a', label: 'Yellow' },
                 { c: '#eff6ff', label: 'Blue' },
                 { c: '#f0fdf4', label: 'Green' },
-                { c: '#fef2f2', label: 'Red' },
                 { c: '#1e293b', label: 'Dark' },
               ].map(({ c, label }) => (
                 <button
@@ -804,31 +772,6 @@ export const PropertiesPanel: React.FC<Props> = ({
                   title={label}
                 />
               ))}
-            </div>
-          </div>
-
-          {/* Border Outline */}
-          <div className="field-group">
-            <label className="field-label">Border Style</label>
-            <div className="segmented-control">
-              <button
-                className={`segment-btn flex-1 ${(selectedTextBox.borderStyle || 'solid') === 'none' ? 'active' : ''}`}
-                onClick={() => updateTextBox({ borderStyle: 'none' })}
-              >
-                None
-              </button>
-              <button
-                className={`segment-btn flex-1 ${(selectedTextBox.borderStyle || 'solid') === 'solid' ? 'active' : ''}`}
-                onClick={() => updateTextBox({ borderStyle: 'solid' })}
-              >
-                Solid
-              </button>
-              <button
-                className={`segment-btn flex-1 ${selectedTextBox.borderStyle === 'dashed' ? 'active' : ''}`}
-                onClick={() => updateTextBox({ borderStyle: 'dashed' })}
-              >
-                Dashed
-              </button>
             </div>
           </div>
 
@@ -849,7 +792,7 @@ export const PropertiesPanel: React.FC<Props> = ({
                 }}
                 title="Automatically resize box to fit text content"
               >
-                Auto-fit to Text
+                Auto-fit
               </button>
             </div>
             <div className="field-row">
@@ -867,74 +810,6 @@ export const PropertiesPanel: React.FC<Props> = ({
                 minCm={15}
                 onChange={(h) => updateTextBox({ height: h })}
               />
-            </div>
-            {/* Quick Size Presets */}
-            <div className="flex gap-1 mt-1">
-              {[
-                { label: 'Small', w: 100, h: 40 },
-                { label: 'Medium', w: 140, h: 55 },
-                { label: 'Large', w: 200, h: 70 },
-                { label: 'Card', w: 180, h: 110 },
-              ].map((p) => (
-                <button
-                  key={p.label}
-                  className="btn-secondary text-[11px] py-1 px-1 flex-1 text-center"
-                  onClick={() => updateTextBox({ width: p.w, height: p.h })}
-                  title={`Resize to ${formatDimension(p.w, state.unit)} × ${formatDimension(p.h, state.unit)}`}
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Rotation Control */}
-          <div className="field-group">
-            <div className="flex justify-between items-center mb-1">
-              <label className="field-label">Rotation</label>
-              <span className="text-xs font-mono font-bold text-blue-600">
-                {selectedTextBox.rotation}°
-              </span>
-            </div>
-            <div className="flex gap-2 items-center">
-              <input
-                type="range"
-                min="0"
-                max="359"
-                value={selectedTextBox.rotation}
-                onChange={(e) => updateTextBox({ rotation: parseInt(e.target.value) })}
-                className="slider-range flex-1"
-              />
-              <button
-                className="tool-btn-icon"
-                onClick={() => handleRotate(90)}
-                title="Rotate 90 degrees clockwise"
-              >
-                <RotateCw size={15} />
-              </button>
-            </div>
-          </div>
-
-          {/* Layer Ordering */}
-          <div className="field-group">
-            <label className="field-label">Z-Order</label>
-            <div className="flex gap-2">
-              <button
-                className="btn-secondary flex-1"
-                onClick={() => handleReorder('front')}
-                title="Bring to front"
-              >
-                <ArrowUp size={14} />
-                <span>Bring Front</span>
-              </button>
-              <button
-                className="btn-secondary flex-1"
-                onClick={() => handleReorder('back')}
-                title="Send to back"
-              >
-                <ArrowDown size={14} />
-                <span>Send Back</span>
-              </button>
             </div>
           </div>
 

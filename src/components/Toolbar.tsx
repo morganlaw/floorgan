@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   MousePointer,
   Square,
@@ -15,6 +15,7 @@ import {
   Redo2,
   Type,
   HelpCircle,
+  Upload,
 } from 'lucide-react';
 import { FloorplanState, ToolMode, Unit } from '../types';
 import { TEMPLATES } from '../templates';
@@ -53,6 +54,20 @@ export const Toolbar: React.FC<Props> = ({
   canUndo,
   canRedo,
 }) => {
+  const [showImportHint, setShowImportHint] = useState(true);
+
+  useEffect(() => {
+    if (!showImportHint) return;
+
+    const handleDismiss = () => {
+      setShowImportHint(false);
+    };
+
+    window.addEventListener('pointerdown', handleDismiss, { capture: true });
+    return () => {
+      window.removeEventListener('pointerdown', handleDismiss, { capture: true });
+    };
+  }, [showImportHint]);
 
   const handleUnitToggle = (unit: Unit) => {
     setState((prev) => ({ ...prev, unit }));
@@ -98,15 +113,31 @@ export const Toolbar: React.FC<Props> = ({
         <h1 className="brand-title">Floorgan</h1>
       </div>
 
-      {/* Primary Feature: Generate Floorplan from Image */}
+      {/* Primary Feature: Import Floorplan */}
       <div className="import-btn-container">
         <button
           className="tool-btn import-highlight-btn"
           onClick={onOpenImportModal}
           title="Import floorplan from image upload or website URL"
         >
-          <span>Generate a floorplan from an image</span>
+          <Upload size={16} />
+          <span>Import Floorplan</span>
         </button>
+
+        {showImportHint && (
+          <div
+            className="import-indicator-callout"
+            onPointerDown={() => onOpenImportModal()}
+            role="tooltip"
+          >
+            <div className="import-indicator-arrow" />
+            <div className="import-indicator-inner">
+              <div className="import-indicator-text">
+                Generate a floorplan from an image
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="divider-vertical" />
