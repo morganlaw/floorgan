@@ -65,9 +65,6 @@ const polygonArea = (pts: Point[]) => {
   return Math.abs(a) / 2;
 };
 
-const formatArea = (cm2: number, unit: Unit) =>
-  unit === 'm' ? `${(cm2 / 10000).toFixed(2)} m²` : `${(cm2 / 929.0304).toFixed(1)} ft²`;
-
 /** Unit-aware numeric input that allows smooth typing and commits valid values in cm. */
 const DimInput: React.FC<{
   label: string;
@@ -577,7 +574,7 @@ export const CustomObjectCreator: React.FC<Props> = ({
         <div className="modal-header">
           <div>
             <h3 className="modal-title">{editingItem ? 'Edit Custom Object' : 'Create Custom Object'}</h3>
-            <p className="import-subtitle">Saved to your catalog under the Custom tag for this session.</p>
+            <p className="import-subtitle">Design custom furniture or architectural elements with specific dimensions.</p>
           </div>
           <button className="modal-close" onClick={onClose} title="Close">
             <X size={18} />
@@ -618,7 +615,7 @@ export const CustomObjectCreator: React.FC<Props> = ({
             </div>
 
             <div className="field-group">
-              <label className="field-label">Mode</label>
+              <label className="field-label">Object Type</label>
               <div className="segmented-control creator-mode-toggle">
                 <button
                   className={`segment-btn ${mode === 'basic' ? 'active' : ''}`}
@@ -630,7 +627,7 @@ export const CustomObjectCreator: React.FC<Props> = ({
                     setMode('basic');
                   }}
                 >
-                  <Shapes size={13} /> Basic
+                  <Shapes size={13} /> Standard Shapes
                 </button>
                 <button
                   className={`segment-btn ${mode === 'advanced' ? 'active' : ''}`}
@@ -641,7 +638,7 @@ export const CustomObjectCreator: React.FC<Props> = ({
                     setMode('advanced');
                   }}
                 >
-                  <PenTool size={13} /> Advanced
+                  <PenTool size={13} /> Freeform Polygon
                 </button>
               </div>
             </div>
@@ -700,23 +697,6 @@ export const CustomObjectCreator: React.FC<Props> = ({
                   </select>
                 </div>
 
-                <div className="field-row">
-                  <div className="field-group flex-1">
-                    <label className="field-label">Workspace</label>
-                    <select
-                      className="select-dropdown"
-                      value={wsIdx}
-                      onChange={(e) => setWsIdx(parseInt(e.target.value))}
-                    >
-                      {WORKSPACES.map((w, i) => (
-                        <option key={i} value={i}>
-                          {formatDimension(w.w, unit)} × {formatDimension(w.h, unit)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
                 <div className="creator-tool-row">
                   <button
                     className={`btn-secondary ${snapOn ? 'active' : ''}`}
@@ -768,28 +748,6 @@ export const CustomObjectCreator: React.FC<Props> = ({
                     </div>
                   </div>
                 )}
-
-                <div className="stats-box">
-                  <span className="stats-header">Shape Info</span>
-                  <div className="stats-row">
-                    <span>Corners</span>
-                    <span className="font-mono">{n}</span>
-                  </div>
-                  <div className="stats-row">
-                    <span>Footprint</span>
-                    <span className="font-mono">
-                      {polyInfo
-                        ? `${formatDimension(polyInfo.width, unit)} × ${formatDimension(polyInfo.depth, unit)}`
-                        : '—'}
-                    </span>
-                  </div>
-                  <div className="stats-row">
-                    <span>Area</span>
-                    <span className="font-mono">
-                      {polyInfo && closed ? formatArea(polyInfo.area, unit) : '—'}
-                    </span>
-                  </div>
-                </div>
               </>
             )}
           </div>
@@ -1054,7 +1012,7 @@ export const CustomObjectCreator: React.FC<Props> = ({
 
             <div className="creator-hint">
               {mode === 'basic'
-                ? 'Need a shape that isn’t listed? Switch to Advanced to draw your own.'
+                ? 'Drag corners or edge handles in the preview to adjust dimensions.'
                 : hint}
             </div>
           </div>

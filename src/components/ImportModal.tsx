@@ -10,7 +10,6 @@ import {
   AlertCircle,
   Loader2,
   FileImage,
-  Ruler,
 } from 'lucide-react';
 import { FloorplanState } from '../types';
 import {
@@ -233,9 +232,9 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport 
         {/* Header */}
         <div className="modal-header">
           <div>
-            <h3 className="modal-title">Import & Parse Floorplan</h3>
+            <h3 className="modal-title">Generate Floorplan from Image</h3>
             <p className="import-subtitle">
-              Deterministic CV wall & opening vectorizer with OCR room dimension calibration
+              Upload a blueprint or floorplan image to automatically generate interactive walls, doors, and windows.
             </p>
           </div>
           <button className="modal-close" onClick={onClose}>
@@ -356,210 +355,187 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport 
               </div>
             )}
 
-            {/* OCR Dimension Auto-Calibration Status Box */}
+            {/* Image Status & Primary Settings */}
             {imageDataUrl && (
-              <div className="ocr-status-box">
-                <div className="flex justify-between items-center">
-                  <div className="flex items-center gap-2">
-                    <Ruler size={14} className="text-blue-600" />
-                    <span className="field-label">Photo Dimension Scale Calibration (OCR)</span>
+              <div className="import-config-card">
+                {isScanningOcr && (
+                  <div className="text-xs text-slate-500 flex items-center gap-1.5 py-1">
+                    <Loader2 size={13} className="spin text-blue-600" />
+                    <span>Detecting blueprint dimensions...</span>
                   </div>
-                  {isScanningOcr && (
-                    <span className="text-xs text-slate-500 flex items-center gap-1">
-                      <Loader2 size={12} className="spin" /> Scanning...
-                    </span>
-                  )}
-                </div>
-
-                {!isScanningOcr &&
-                parseResult &&
-                parseResult.detectedDimensions.length > 0 ? (
-                  <>
-                    <div className="ocr-chips">
-                      {parseResult.detectedDimensions.map((d, i) => (
-                        <span
-                          key={i}
-                          className={`ocr-chip ${d.impliedCmPerPx ? 'matched' : ''}`}
-                          title={
-                            d.impliedCmPerPx
-                              ? `Matched to enclosing room walls (${d.impliedCmPerPx.toFixed(2)} cm/px)`
-                              : 'Detected dimension label'
-                          }
-                        >
-                          {d.rawText}
-                        </span>
-                      ))}
-                    </div>
-                    {parseResult.autoCalibratedWidthMeters && (
-                      <label className="checkbox-row mt-1">
-                        <input
-                          type="checkbox"
-                          checked={useOcrScale}
-                          onChange={(e) => setUseOcrScale(e.target.checked)}
-                        />
-                        <span>
-                          Respect photo dimensions (calibrated width:{' '}
-                          <strong>{parseResult.autoCalibratedWidthMeters.toFixed(2)}m</strong>)
-                        </span>
-                      </label>
-                    )}
-                  </>
-                ) : (
-                  !isScanningOcr && (
-                    <span className="text-xs text-slate-500">
-                      No printed dimensions detected in photo — using default scale.
-                    </span>
-                  )
                 )}
-              </div>
-            )}
 
-            {/* Deterministic Morphological Parser Parameters */}
-            <div className="parser-settings-card">
-              <div className="parser-card-header">
-                <Sliders size={14} />
-                <span>Morphological Wall & Opening Detector</span>
-              </div>
-
-              {/* Wall Darkness Threshold */}
-              <div className="field-group">
-                <div className="flex justify-between items-center">
-                  <label className="field-label">Wall Darkness Threshold</label>
-                  <label className="checkbox-inline">
+                {!isScanningOcr && parseResult?.autoCalibratedWidthMeters && (
+                  <label className="checkbox-row import-scale-row">
                     <input
                       type="checkbox"
-                      checked={options.threshold === 0}
-                      onChange={(e) =>
-                        setOptions((prev) => ({
-                          ...prev,
-                          threshold: e.target.checked
-                            ? 0
-                            : parseResult?.computedThreshold || 160,
-                        }))
-                      }
+                      checked={useOcrScale}
+                      onChange={(e) => setUseOcrScale(e.target.checked)}
                     />
-                    <span>Auto (Otsu: {parseResult?.computedThreshold ?? 160})</span>
+                    <span>
+                      Use detected scale (width: <strong>{parseResult.autoCalibratedWidthMeters.toFixed(1)}m</strong>)
+                    </span>
+                  </label>
+                )}
+
+                <div className="import-toggles-clean">
+                  <label className="checkbox-row">
+                    <input
+                      type="checkbox"
+                      checked={includeUnderlay}
+                      onChange={(e) => setIncludeUnderlay(e.target.checked)}
+                    />
+                    <span>Keep image as background reference underlay</span>
+                  </label>
+
+                  <label className="checkbox-row">
+                    <input
+                      type="checkbox"
+                      checked={keepExistingFurniture}
+                      onChange={(e) => setKeepExistingFurniture(e.target.checked)}
+                    />
+                    <span>Keep current furniture on canvas</span>
                   </label>
                 </div>
-                {options.threshold > 0 && (
-                  <input
-                    type="range"
-                    min="40"
-                    max="240"
-                    value={options.threshold}
-                    onChange={(e) =>
-                      setOptions((prev) => ({ ...prev, threshold: Number(e.target.value) }))
-                    }
-                    className="slider-range"
-                  />
-                )}
+
+                {/* Collapsible fine-tuning settings */}
+                <details className="parser-settings-disclosure">
+                  <summary className="parser-disclosure-header">
+                    <Sliders size={13} />
+                    <span>Fine-tune detection settings</span>
+                  </summary>
+
+                  <div className="parser-disclosure-body">
+                    <div className="field-group">
+                      <div className="flex justify-between items-center">
+                        <label className="field-label">Wall Darkness Sensitivity</label>
+                        <label className="checkbox-inline">
+                          <input
+                            type="checkbox"
+                            checked={options.threshold === 0}
+                            onChange={(e) =>
+                              setOptions((prev) => ({
+                                ...prev,
+                                threshold: e.target.checked
+                                  ? 0
+                                  : parseResult?.computedThreshold || 160,
+                              }))
+                            }
+                          />
+                          <span>Auto</span>
+                        </label>
+                      </div>
+                      {options.threshold > 0 && (
+                        <input
+                          type="range"
+                          min="40"
+                          max="240"
+                          value={options.threshold}
+                          onChange={(e) =>
+                            setOptions((prev) => ({ ...prev, threshold: Number(e.target.value) }))
+                          }
+                          className="slider-range"
+                        />
+                      )}
+                    </div>
+
+                    <div className="field-group">
+                      <div className="flex justify-between items-center">
+                        <label className="field-label">Noise & Text Filter</label>
+                        <span className="text-xs font-mono font-bold text-blue-600">
+                          {options.minWallThicknessPx} px
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min="1"
+                        max="9"
+                        step="1"
+                        value={options.minWallThicknessPx}
+                        onChange={(e) =>
+                          setOptions((prev) => ({
+                            ...prev,
+                            minWallThicknessPx: Number(e.target.value),
+                          }))
+                        }
+                        className="slider-range"
+                      />
+                    </div>
+
+                    <div className="field-group">
+                      <div className="flex justify-between items-center">
+                        <label className="field-label">Min Wall Length</label>
+                        <span className="text-xs font-mono font-bold text-blue-600">
+                          {options.minWallLengthCm} cm
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min="30"
+                        max="160"
+                        step="10"
+                        value={options.minWallLengthCm}
+                        onChange={(e) =>
+                          setOptions((prev) => ({
+                            ...prev,
+                            minWallLengthCm: Number(e.target.value),
+                          }))
+                        }
+                        className="slider-range"
+                      />
+                    </div>
+
+                    <div className="parser-toggles">
+                      <label className="checkbox-row">
+                        <input
+                          type="checkbox"
+                          checked={options.detectOpenings}
+                          onChange={(e) =>
+                            setOptions((prev) => ({ ...prev, detectOpenings: e.target.checked }))
+                          }
+                        />
+                        <span>Auto-detect doors & windows</span>
+                      </label>
+
+                      <label className="checkbox-row">
+                        <input
+                          type="checkbox"
+                          checked={options.closeHollowWalls}
+                          onChange={(e) =>
+                            setOptions((prev) => ({
+                              ...prev,
+                              closeHollowWalls: e.target.checked,
+                            }))
+                          }
+                        />
+                        <span>Fill double-line walls</span>
+                      </label>
+
+                      <label className="checkbox-row">
+                        <input
+                          type="checkbox"
+                          checked={options.invert}
+                          onChange={(e) =>
+                            setOptions((prev) => ({ ...prev, invert: e.target.checked }))
+                          }
+                        />
+                        <span>Invert colors (for dark blueprints)</span>
+                      </label>
+                    </div>
+                  </div>
+                </details>
+
+                <button
+                  type="button"
+                  className="btn-primary w-full mt-3"
+                  disabled={!parseResult}
+                  onClick={handleApplyImport}
+                >
+                  <Check size={16} />
+                  <span>Generate Floorplan</span>
+                </button>
               </div>
-
-              {/* Minimum Wall Thickness (Strips text, dimension lines, furniture icons) */}
-              <div className="field-group">
-                <div className="flex justify-between items-center">
-                  <label className="field-label">Strip Thin Lines / Text Filter</label>
-                  <span className="text-xs font-mono font-bold text-blue-600">
-                    {options.minWallThicknessPx} px
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min="1"
-                  max="9"
-                  step="1"
-                  value={options.minWallThicknessPx}
-                  onChange={(e) =>
-                    setOptions((prev) => ({
-                      ...prev,
-                      minWallThicknessPx: Number(e.target.value),
-                    }))
-                  }
-                  className="slider-range"
-                />
-              </div>
-
-              {/* Minimum Wall Segment Length */}
-              <div className="field-group">
-                <div className="flex justify-between items-center">
-                  <label className="field-label">Min Wall Segment Length</label>
-                  <span className="text-xs font-mono font-bold text-blue-600">
-                    {options.minWallLengthCm} cm
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min="30"
-                  max="160"
-                  step="10"
-                  value={options.minWallLengthCm}
-                  onChange={(e) =>
-                    setOptions((prev) => ({
-                      ...prev,
-                      minWallLengthCm: Number(e.target.value),
-                    }))
-                  }
-                  className="slider-range"
-                />
-              </div>
-
-              {/* Toggles */}
-              <div className="parser-toggles">
-                <label className="checkbox-row">
-                  <input
-                    type="checkbox"
-                    checked={options.detectOpenings}
-                    onChange={(e) =>
-                      setOptions((prev) => ({ ...prev, detectOpenings: e.target.checked }))
-                    }
-                  />
-                  <span>Auto-detect doors & windows in wall gaps</span>
-                </label>
-
-                <label className="checkbox-row">
-                  <input
-                    type="checkbox"
-                    checked={options.closeHollowWalls}
-                    onChange={(e) =>
-                      setOptions((prev) => ({
-                        ...prev,
-                        closeHollowWalls: e.target.checked,
-                      }))
-                    }
-                  />
-                  <span>Bridge hollow double-line CAD walls</span>
-                </label>
-
-                <label className="checkbox-row">
-                  <input
-                    type="checkbox"
-                    checked={options.invert}
-                    onChange={(e) =>
-                      setOptions((prev) => ({ ...prev, invert: e.target.checked }))
-                    }
-                  />
-                  <span>Invert colors (dark blueprint background)</span>
-                </label>
-
-                <label className="checkbox-row">
-                  <input
-                    type="checkbox"
-                    checked={includeUnderlay}
-                    onChange={(e) => setIncludeUnderlay(e.target.checked)}
-                  />
-                  <span>Include image as reference underlay on canvas</span>
-                </label>
-
-                <label className="checkbox-row">
-                  <input
-                    type="checkbox"
-                    checked={keepExistingFurniture}
-                    onChange={(e) => setKeepExistingFurniture(e.target.checked)}
-                  />
-                  <span>Keep existing furniture currently on canvas</span>
-                </label>
-              </div>
-            </div>
+            )}
           </div>
 
           {/* Right Column: Interactive Live Vector Preview */}
@@ -589,11 +565,6 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport 
                   <span className="preview-badge">{parseResult.walls.length} Walls</span>
                   <span className="preview-badge">{parseResult.doors.length} Doors</span>
                   <span className="preview-badge">{parseResult.windows.length} Windows</span>
-                  {parseResult.detectedDimensions.length > 0 && (
-                    <span className="preview-badge">
-                      {parseResult.detectedDimensions.length} OCR Dims
-                    </span>
-                  )}
                 </div>
               )}
             </div>
@@ -684,7 +655,7 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport 
 
             <div className="preview-footer">
               <span className="text-xs text-slate-500">
-                Tip: Printed room/wall dimensions are read via OCR and matched to enclosing walls automatically.
+                Tip: Generated walls, doors, and windows can be resized, moved, or deleted on the canvas.
               </span>
               <div className="flex gap-2">
                 <button type="button" className="btn-secondary" onClick={onClose}>
@@ -697,7 +668,7 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport 
                   onClick={handleApplyImport}
                 >
                   <Check size={15} />
-                  <span>Create Interactive Floorplan</span>
+                  <span>Generate Floorplan</span>
                 </button>
               </div>
             </div>

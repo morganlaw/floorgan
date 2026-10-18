@@ -1296,35 +1296,8 @@ export const PropertiesPanel: React.FC<Props> = ({
             Select any furniture, wall, door, or window on the canvas to inspect dimensions, rotate,
             or customize colors.
           </p>
-
-          <div className="stats-box mt-6">
-            <span className="stats-header">Floorplan Stats</span>
-            <div className="stats-row">
-              <span>Walls:</span>
-              <span className="font-mono font-semibold">{state.walls.length}</span>
-            </div>
-            <div className="stats-row">
-              <span>Furniture Items:</span>
-              <span className="font-mono font-semibold">{state.furniture.length}</span>
-            </div>
-            <div className="stats-row">
-              <span>Doors:</span>
-              <span className="font-mono font-semibold">{state.doors.length}</span>
-            </div>
-            <div className="stats-row">
-              <span>Windows:</span>
-              <span className="font-mono font-semibold">{state.windows.length}</span>
-            </div>
-            {(state.textBoxes || []).length > 0 && (
-              <div className="stats-row">
-                <span>Text Boxes:</span>
-                <span className="font-mono font-semibold">{(state.textBoxes || []).length}</span>
-              </div>
-            )}
-          </div>
-
           {state.background && (
-            <div className="stats-box mt-4">
+            <div className="stats-box mt-6">
               <span className="stats-header">Imported Floorplan Underlay</span>
               <div className="field-group mt-2">
                 <div className="flex justify-between items-center">

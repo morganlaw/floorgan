@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import {
   MousePointer,
   Square,
@@ -10,13 +10,11 @@ import {
   ZoomIn,
   ZoomOut,
   RotateCcw,
-  Trash2,
-  ScanLine,
   Scaling,
   Undo2,
   Redo2,
   Type,
-  Sparkles,
+  HelpCircle,
 } from 'lucide-react';
 import { FloorplanState, ToolMode, Unit } from '../types';
 import { TEMPLATES } from '../templates';
@@ -32,6 +30,7 @@ interface Props {
   setSelectedId: (id: string | null) => void;
   setSelectedType: (type: any) => void;
   onOpenImportModal: () => void;
+  onOpenShortcuts?: () => void;
   undo: () => void;
   redo: () => void;
   canUndo: boolean;
@@ -48,25 +47,12 @@ export const Toolbar: React.FC<Props> = ({
   setSelectedId,
   setSelectedType,
   onOpenImportModal,
+  onOpenShortcuts,
   undo,
   redo,
   canUndo,
   canRedo,
 }) => {
-  const [showImportHint, setShowImportHint] = useState(true);
-
-  useEffect(() => {
-    if (!showImportHint) return;
-
-    const handleDismiss = () => {
-      setShowImportHint(false);
-    };
-
-    window.addEventListener('pointerdown', handleDismiss, { capture: true });
-    return () => {
-      window.removeEventListener('pointerdown', handleDismiss, { capture: true });
-    };
-  }, [showImportHint]);
 
   const handleUnitToggle = (unit: Unit) => {
     setState((prev) => ({ ...prev, unit }));
@@ -112,32 +98,15 @@ export const Toolbar: React.FC<Props> = ({
         <h1 className="brand-title">Floorgan</h1>
       </div>
 
-      {/* Primary Feature: Parse from Floorplan */}
+      {/* Primary Feature: Generate Floorplan from Image */}
       <div className="import-btn-container">
         <button
           className="tool-btn import-highlight-btn"
           onClick={onOpenImportModal}
           title="Import floorplan from image upload or website URL"
         >
-          <ScanLine size={18} />
-          <span>Parse from floorplan</span>
+          <span>Generate a floorplan from an image</span>
         </button>
-
-        {showImportHint && (
-          <div
-            className="import-indicator-callout"
-            onPointerDown={() => onOpenImportModal()}
-            role="tooltip"
-          >
-            <div className="import-indicator-arrow" />
-            <div className="import-indicator-inner">
-              <Sparkles size={16} className="import-indicator-icon" />
-              <div className="import-indicator-text">
-                Click here to create an interactive floorplan from an image
-              </div>
-            </div>
-          </div>
-        )}
       </div>
 
       <div className="divider-vertical" />
@@ -299,7 +268,7 @@ export const Toolbar: React.FC<Props> = ({
         </button>
       </div>
 
-      {/* Right Group: Compact Template Loader & Clear */}
+      {/* Right Group: Compact Template Loader & Shortcuts */}
       <div className="tool-group-right">
         <select
           className="select-dropdown select-dropdown-sm"
@@ -318,13 +287,15 @@ export const Toolbar: React.FC<Props> = ({
           <option value="clear">Clear Canvas</option>
         </select>
 
-        <button
-          className="tool-btn-icon danger"
-          onClick={() => handleTemplateLoad('clear')}
-          title="Clear Floorplan"
-        >
-          <Trash2 size={18} />
-        </button>
+        {onOpenShortcuts && (
+          <button
+            className="tool-btn-icon"
+            onClick={onOpenShortcuts}
+            title="Keyboard shortcuts & guide"
+          >
+            <HelpCircle size={18} />
+          </button>
+        )}
       </div>
     </header>
   );

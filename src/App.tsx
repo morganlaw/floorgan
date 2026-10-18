@@ -7,7 +7,7 @@ import { FloorplanCanvas } from './components/FloorplanCanvas';
 import { PropertiesPanel } from './components/PropertiesPanel';
 import { ImportModal } from './components/ImportModal';
 import { useFloorplanHistory } from './utils/useHistory';
-import { HelpCircle, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import './App.css';
 
 const STORAGE_KEY = 'floorgan_floorplan_v1';
@@ -140,6 +140,7 @@ export const App: React.FC = () => {
         setSelectedId={setSelectedId}
         setSelectedType={setSelectedType}
         onOpenImportModal={() => setShowImportModal(true)}
+        onOpenShortcuts={() => setShowHelp(true)}
         undo={undo}
         redo={redo}
         canUndo={canUndo}
@@ -205,15 +206,6 @@ export const App: React.FC = () => {
         }}
       />
 
-      {/* Floating Keyboard Shortcuts Button */}
-      <button
-        className="floating-help-btn"
-        onClick={() => setShowHelp(true)}
-        title="Keyboard shortcuts & guide"
-      >
-        <HelpCircle size={18} />
-        <span>Shortcuts</span>
-      </button>
 
       {/* Shortcuts & Guide Modal */}
       {showHelp && (

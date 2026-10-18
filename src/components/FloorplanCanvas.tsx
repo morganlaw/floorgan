@@ -2991,12 +2991,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
         </div>
       )}
       {/* Bottom Right Grid Cell Scale & Dimension HUD */}
-      <div
-        className="canvas-grid-hud"
-        onClick={() => setState((prev) => ({ ...prev, gridSnap: !prev.gridSnap }))}
-        title="Click to toggle grid snapping"
-        style={{ cursor: 'pointer' }}
-      >
+      <div className="canvas-grid-hud">
         <div className="grid-hud-icon">
           <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
             <rect x="1" y="1" width="9" height="9" stroke="#64748b" strokeWidth="1" strokeDasharray="2 2" fill="rgba(148, 163, 184, 0.2)" />

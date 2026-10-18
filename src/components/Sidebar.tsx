@@ -1,12 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { Armchair, Bed, Shapes, Search, Plus, Pencil, Trash2, Type } from 'lucide-react';
+import { Armchair, Bed, Shapes, Search, Plus, Pencil, Trash2 } from 'lucide-react';
 import { FURNITURE_CATALOG } from '../catalog';
 import {
   FurnitureCatalogItem,
   FurnitureCategory,
   PlacedFurniture,
   FloorplanState,
-  TextBoxItem,
 } from '../types';
 import { formatDimension } from '../utils/geometry';
 import { TableIcon } from './icons/TableIcon';
@@ -135,35 +134,6 @@ export const Sidebar: React.FC<Props> = ({
     setCustomItems((prev) => prev.filter((i) => i.catalogId !== catalogId));
   };
 
-  const handleAddTextBox = () => {
-    const newTextBox: TextBoxItem = {
-      id: 'text_' + Date.now(),
-      text: 'Custom Text',
-      x: 400 + ((state.textBoxes || []).length % 5) * 20,
-      y: 350 + ((state.textBoxes || []).length % 5) * 20,
-      width: 130,
-      height: 50,
-      fontSize: 16,
-      color: '#1e293b',
-      backgroundColor: '#ffffff',
-      borderColor: '#cbd5e1',
-      borderStyle: 'solid',
-      borderRadius: 6,
-      rotation: 0,
-      textAlign: 'center',
-      bold: false,
-      italic: false,
-    };
-
-    setState((prev) => ({
-      ...prev,
-      textBoxes: [...(prev.textBoxes || []), newTextBox],
-    }));
-
-    setSelectedId(newTextBox.id);
-    setSelectedType('textbox');
-  };
-
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
@@ -203,61 +173,15 @@ export const Sidebar: React.FC<Props> = ({
       {/* Item List */}
       <div className="catalog-grid">
         <div className="custom-actions-bar">
-          <button className="create-custom-btn flex-1" onClick={() => openCreator()} title="Create custom object shape">
+          <button className="create-custom-btn w-full" onClick={() => openCreator()} title="Create custom object shape">
             <Plus size={14} />
-            <span>Custom Shape</span>
-          </button>
-          <button className="create-custom-btn flex-1" onClick={handleAddTextBox} title="Add custom text box / annotation">
-            <Type size={14} />
-            <span>Text Box</span>
+            <span>Create Custom Shape</span>
           </button>
         </div>
 
-        {((selectedCategory === 'custom' || selectedCategory === 'all') &&
-          (!query || 'custom text box annotation note label'.includes(query))) && (
-          <div
-            className="catalog-card"
-            onClick={handleAddTextBox}
-            title="Click to place a customizable text box"
-          >
-            <div className="catalog-card-preview" style={{ backgroundColor: '#eff6ff' }}>
-              <div
-                style={{
-                  width: 40,
-                  height: 28,
-                  backgroundColor: '#ffffff',
-                  border: '1.5px dashed #3b82f6',
-                  borderRadius: 4,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: '#2563eb',
-                  fontWeight: 700,
-                  fontSize: 13,
-                  fontFamily: 'sans-serif',
-                }}
-              >
-                Tt
-              </div>
-            </div>
-            <div className="catalog-card-info">
-              <span className="item-name">
-                Text Box
-                <span className="custom-tag">Custom</span>
-              </span>
-              <span className="item-dims">
-                Custom text, font &amp; colors
-              </span>
-            </div>
-            <button className="add-btn" title="Add to floorplan">
-              <Plus size={14} />
-            </button>
-          </div>
-        )}
-
         {selectedCategory === 'custom' && customItems.length === 0 && (
           <div className="catalog-empty">
-            Create custom shapes or place text boxes to annotate your floorplan.
+            Create custom furniture shapes to add to your floorplan.
           </div>
         )}
 
