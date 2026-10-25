@@ -1,0 +1,63 @@
+name: Sync Build to Website
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  sync-to-website:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout MapGAN
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Check for deploy token
+        id: check-token
+        run: |
+          if [ -n "${{ secrets.WEBSITE_DEPLOY_TOKEN }}" ]; then
+            echo "has_token=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_token=false" >> $GITHUB_OUTPUT
+            echo "WEBSITE_DEPLOY_TOKEN secret not set. Skipping automatic cross-repo push."
+          fi
+
+      - name: Checkout Website Repository
+        if: steps.check-token.outputs.has_token == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: morganlaw/morganlaw.github.io
+          path: website
+          token: ${{ secrets.WEBSITE_DEPLOY_TOKEN }}
+
+      - name: Copy build to website/floorgan
+        if: steps.check-token.outputs.has_token == 'true'
+        run: |
+          rm -rf website/floorgan
+          cp -r dist website/floorgan
+
+      - name: Commit and push to website
+        if: steps.check-token.outputs.has_token == 'true'
+        run: |
+          cd website
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add floorgan
+          if git diff --staged --quiet; then
+            echo "No changes to deploy"
+          else
+            git commit -m "Auto-deploy FloorGAN from morganlaw/floorgan@${{ github.sha }}"
+            git push origin master
+          fi
