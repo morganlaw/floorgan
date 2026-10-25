@@ -24,8 +24,13 @@ import {
   fetchFloorplanFromUrl,
   fetchImageUrlAsDataUrl,
   createSampleBlueprintDataUrl,
-} from '../utils/floorplanParser';
-import { segmentFloorplanMlBrowser } from '../utils/mlSegmenter';
+  terminateOcrWorker,
+} from '../utils/floorplanParser.ts';
+import {
+  segmentFloorplanMlBrowser,
+  prewarmBrowserMl,
+  releaseBrowserMlSession,
+} from '../utils/mlSegmenter.ts';
 
 interface ImportModalProps {
   isOpen: boolean;
@@ -93,6 +98,15 @@ export const ImportModal: React.FC<ImportModalProps> = ({
 
     window.addEventListener('paste', handlePaste);
     return () => window.removeEventListener('paste', handlePaste);
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (isOpen) {
+      prewarmBrowserMl().catch(() => {});
+    } else {
+      releaseBrowserMlSession().catch(() => {});
+      terminateOcrWorker().catch(() => {});
+    }
   }, [isOpen]);
 
   useEffect(() => {

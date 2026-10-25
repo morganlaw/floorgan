@@ -1884,6 +1884,41 @@ export function parseRoomNameText(text: string): string | null {
   return null;
 }
 
+let cachedOcrWorker: Tesseract.Worker | null = null;
+let ocrWorkerPromise: Promise<Tesseract.Worker> | null = null;
+
+async function getOcrWorker(): Promise<Tesseract.Worker> {
+  if (cachedOcrWorker) return cachedOcrWorker;
+  if (ocrWorkerPromise) return ocrWorkerPromise;
+
+  ocrWorkerPromise = (async () => {
+    const worker = await Tesseract.createWorker('eng');
+    await worker.setParameters({
+      tessedit_pageseg_mode: Tesseract.PSM.SPARSE_TEXT,
+    });
+    cachedOcrWorker = worker;
+    return worker;
+  })();
+
+  try {
+    return await ocrWorkerPromise;
+  } catch (err) {
+    ocrWorkerPromise = null;
+    throw err;
+  }
+}
+
+export async function terminateOcrWorker(): Promise<void> {
+  if (cachedOcrWorker) {
+    const w = cachedOcrWorker;
+    cachedOcrWorker = null;
+    ocrWorkerPromise = null;
+    try {
+      await w.terminate();
+    } catch {}
+  }
+}
+
 export async function extractOcrDimensionsFromImage(
   img: HTMLImageElement,
   invert = false
@@ -1923,52 +1958,45 @@ export async function extractOcrDimensionsFromImage(
     ctx.putImageData(data, 0, 0);
   }
 
-  const worker = await Tesseract.createWorker('eng');
-  try {
-    await worker.setParameters({
-      tessedit_pageseg_mode: Tesseract.PSM.SPARSE_TEXT,
-    });
-    const result = await worker.recognize(canvas, {}, { blocks: true });
-    const dimensions: RawDimensionCandidate[] = [];
-    const roomNames: RawRoomNameCandidate[] = [];
-    const textBoxes: OcrTextBoxPx[] = [];
+  const worker = await getOcrWorker();
+  const result = await worker.recognize(canvas, {}, { blocks: true });
+  const dimensions: RawDimensionCandidate[] = [];
+  const roomNames: RawRoomNameCandidate[] = [];
+  const textBoxes: OcrTextBoxPx[] = [];
 
-    const blocks = result.data?.blocks || [];
-    for (const block of blocks) {
-      for (const para of block.paragraphs || []) {
-        for (const line of para.lines || []) {
-          if (!line.bbox) continue;
-          const x0Px = Math.floor((line.bbox.x0 / ocrW) * procW);
-          const y0Px = Math.floor((line.bbox.y0 / ocrH) * procH);
-          const x1Px = Math.ceil((line.bbox.x1 / ocrW) * procW);
-          const y1Px = Math.ceil((line.bbox.y1 / ocrH) * procH);
-          const cxPx = (x0Px + x1Px) / 2;
-          const cyPx = (y0Px + y1Px) / 2;
+  const blocks = result.data?.blocks || [];
+  for (const block of blocks) {
+    for (const para of block.paragraphs || []) {
+      for (const line of para.lines || []) {
+        if (!line.bbox) continue;
+        const x0Px = Math.floor((line.bbox.x0 / ocrW) * procW);
+        const y0Px = Math.floor((line.bbox.y0 / ocrH) * procH);
+        const x1Px = Math.ceil((line.bbox.x1 / ocrW) * procW);
+        const y1Px = Math.ceil((line.bbox.y1 / ocrH) * procH);
+        const cxPx = (x0Px + x1Px) / 2;
+        const cyPx = (y0Px + y1Px) / 2;
 
-          if (/[a-zA-Z0-9]{2,}/.test(line.text) && y1Px - y0Px < procH * 0.12) {
-            textBoxes.push({ x0: x0Px, y0: y0Px, x1: x1Px, y1: y1Px });
-          }
+        if (/[a-zA-Z0-9]{2,}/.test(line.text) && y1Px - y0Px < procH * 0.12) {
+          textBoxes.push({ x0: x0Px, y0: y0Px, x1: x1Px, y1: y1Px });
+        }
 
-          const parsedDim = parseDimensionText(line.text);
-          if (parsedDim) {
-            dimensions.push({
-              rawText: parsedDim.matchedText,
-              kind: parsedDim.kind,
-              unit: parsedDim.unit,
-              val1Cm: parsedDim.val1Cm,
-              val2Cm: parsedDim.val2Cm,
-              cxPx,
-              cyPx,
-            });
-          }
+        const parsedDim = parseDimensionText(line.text);
+        if (parsedDim) {
+          dimensions.push({
+            rawText: parsedDim.matchedText,
+            kind: parsedDim.kind,
+            unit: parsedDim.unit,
+            val1Cm: parsedDim.val1Cm,
+            val2Cm: parsedDim.val2Cm,
+            cxPx,
+            cyPx,
+          });
         }
       }
     }
-
-    return { dimensions, roomNames, textBoxes };
-  } finally {
-    await worker.terminate();
   }
+
+  return { dimensions, roomNames, textBoxes };
 }
 
 export function carveOpeningsFromWalls(

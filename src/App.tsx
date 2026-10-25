@@ -8,6 +8,7 @@ import { FloorplanCanvas } from './components/FloorplanCanvas';
 import { PropertiesPanel } from './components/PropertiesPanel';
 import { ImportModal } from './components/ImportModal';
 import { useFloorplanHistory } from './utils/useHistory';
+import { prewarmModelCache } from './utils/mlSegmenter.ts';
 import './App.css';
 
 const STORAGE_KEY = 'floorgan_floorplan_v1';
@@ -53,6 +54,19 @@ export const App: React.FC = () => {
       }
     }
   }, [state]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const prefetch = () => {
+        prewarmModelCache().catch(() => {});
+      };
+      if ('requestIdleCallback' in window) {
+        (window as unknown as { requestIdleCallback: (cb: () => void, opts: { timeout: number }) => void }).requestIdleCallback(prefetch, { timeout: 3500 });
+      } else {
+        setTimeout(prefetch, 1500);
+      }
+    }
+  }, []);
 
   const [tool, setTool] = useState<ToolMode>('select');
   const [selectedId, setSelectedId] = useState<string | null>(null);

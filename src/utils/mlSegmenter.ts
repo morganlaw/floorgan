@@ -5,10 +5,12 @@ import {
   type ParseOptions,
   type RawSegment,
   type SegmentationMasks,
-} from './floorplanParser';
+} from './floorplanParser.ts';
 
 export const ML_MODEL_INPUT_SIZE = 768;
 export const ML_MODEL_NUM_PARTS = 3;
+
+ort.env.wasm.simd = 'relaxed';
 
 const viteBaseUrl =
   typeof import.meta !== 'undefined' &&
@@ -17,6 +19,78 @@ const viteBaseUrl =
     : '/';
 
 export const DEFAULT_MODEL_URL = `${viteBaseUrl.endsWith('/') ? viteBaseUrl : `${viteBaseUrl}/`}models/floorplan-seg-v1.onnx`;
+
+export const MODEL_CACHE_NAME = 'floorgan-models-v1';
+export const MODEL_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+export async function fetchShardWithCache(url: string): Promise<Uint8Array> {
+  if (typeof caches !== 'undefined') {
+    try {
+      const cache = await caches.open(MODEL_CACHE_NAME);
+      const cached = await cache.match(url);
+      if (cached) {
+        const cachedAt = cached.headers.get('x-floorgan-cached-at');
+        const isExpired = cachedAt && Date.now() - Number(cachedAt) > MODEL_CACHE_TTL_MS;
+        if (!isExpired) {
+          return new Uint8Array(await cached.arrayBuffer());
+        }
+        try {
+          const headResp = await fetch(url, { method: 'HEAD' });
+          const newEtag = headResp.headers.get('etag');
+          const oldEtag = cached.headers.get('etag');
+          if (newEtag && oldEtag && newEtag === oldEtag) {
+            const headers = new Headers(cached.headers);
+            headers.set('x-floorgan-cached-at', String(Date.now()));
+            const refreshed = new Response(cached.body, { headers });
+            await cache.put(url, refreshed.clone());
+            return new Uint8Array(await refreshed.arrayBuffer());
+          }
+        } catch {
+          return new Uint8Array(await cached.arrayBuffer());
+        }
+      }
+
+      const resp = await fetch(url);
+      if (!resp.ok) {
+        throw new Error(`Failed to fetch model shard ${url}: ${resp.status}`);
+      }
+      const data = await resp.arrayBuffer();
+      const headers = new Headers(resp.headers);
+      headers.set('x-floorgan-cached-at', String(Date.now()));
+      const toCache = new Response(data, { headers });
+      await cache.put(url, toCache);
+      return new Uint8Array(data);
+    } catch (err) {
+      console.warn('CacheStorage failed for shard, falling back to direct fetch:', err);
+    }
+  }
+
+  const resp = await fetch(url);
+  if (!resp.ok) {
+    throw new Error(`Failed to fetch model shard ${url}: ${resp.status}`);
+  }
+  return new Uint8Array(await resp.arrayBuffer());
+}
+
+export async function prewarmModelCache(modelUrl = DEFAULT_MODEL_URL): Promise<void> {
+  if (typeof caches === 'undefined') return;
+  const cache = await caches.open(MODEL_CACHE_NAME);
+  await Promise.all(
+    Array.from({ length: ML_MODEL_NUM_PARTS }, async (_, idx) => {
+      const shardUrl = `${modelUrl}.part${idx}`;
+      const match = await cache.match(shardUrl);
+      if (!match) {
+        const resp = await fetch(shardUrl);
+        if (resp.ok) {
+          const headers = new Headers(resp.headers);
+          headers.set('x-floorgan-cached-at', String(Date.now()));
+          const toCache = new Response(await resp.arrayBuffer(), { headers });
+          await cache.put(shardUrl, toCache);
+        }
+      }
+    })
+  );
+}
 
 let cachedSession: ort.InferenceSession | null = null;
 let sessionPromise: Promise<ort.InferenceSession> | null = null;
@@ -158,17 +232,10 @@ export async function getBrowserMlSession(
       ? Math.min(4, navigator.hardwareConcurrency || 2)
       : 1;
 
-    // Model is split into <18MB shards to satisfy Cloudflare Pages 25MB per-file limit
     const partBuffers = await Promise.all(
-      Array.from({ length: ML_MODEL_NUM_PARTS }, async (_, idx) => {
-        const resp = await fetch(`${modelUrl}.part${idx}`);
-        if (!resp.ok) {
-          throw new Error(
-            `Failed to fetch model shard ${modelUrl}.part${idx}: ${resp.status}`
-          );
-        }
-        return new Uint8Array(await resp.arrayBuffer());
-      })
+      Array.from({ length: ML_MODEL_NUM_PARTS }, (_, idx) =>
+        fetchShardWithCache(`${modelUrl}.part${idx}`)
+      )
     );
 
     const totalLen = partBuffers.reduce((acc, b) => acc + b.byteLength, 0);
@@ -195,6 +262,86 @@ export async function getBrowserMlSession(
   }
 }
 
+let activeWorker: Worker | null = null;
+let msgId = 1;
+const pendingCallbacks = new Map<
+  number,
+  { resolve: (val: any) => void; reject: (err: any) => void }
+>();
+
+function getOrCreateWorker(): Worker {
+  if (!activeWorker) {
+    activeWorker = new Worker(new URL('./mlWorker.ts', import.meta.url), {
+      type: 'module',
+    });
+    activeWorker.onmessage = (e: MessageEvent) => {
+      const { id, type, payload, error } = e.data;
+      const cb = pendingCallbacks.get(id);
+      if (cb) {
+        pendingCallbacks.delete(id);
+        if (type === 'ERROR') {
+          cb.reject(new Error(error));
+        } else {
+          cb.resolve(payload);
+        }
+      }
+    };
+    activeWorker.onerror = (err) => {
+      console.error('ML Background Worker Error:', err);
+      for (const [_, cb] of pendingCallbacks) {
+        cb.reject(err);
+      }
+      pendingCallbacks.clear();
+      terminateMlWorker();
+    };
+  }
+  return activeWorker;
+}
+
+export function terminateMlWorker(): void {
+  if (activeWorker) {
+    activeWorker.terminate();
+    activeWorker = null;
+    for (const [_, cb] of pendingCallbacks) {
+      cb.reject(new Error('ML inference cancelled and worker terminated'));
+    }
+    pendingCallbacks.clear();
+  }
+}
+
+export async function prewarmBrowserMl(modelUrl = DEFAULT_MODEL_URL): Promise<void> {
+  if (typeof window === 'undefined' || typeof Worker === 'undefined') return;
+  const worker = getOrCreateWorker();
+  const id = msgId++;
+  return new Promise((resolve, reject) => {
+    pendingCallbacks.set(id, { resolve, reject });
+    worker.postMessage({ id, type: 'WARM', payload: { modelUrl } });
+  });
+}
+
+export async function releaseBrowserMlSession(): Promise<void> {
+  if (typeof window !== 'undefined' && typeof Worker !== 'undefined') {
+    if (activeWorker) {
+      terminateMlWorker();
+    }
+  }
+
+  if (sessionPromise) {
+    try {
+      await sessionPromise;
+    } catch {}
+  }
+  if (cachedSession) {
+    try {
+      await cachedSession.release();
+    } catch (err) {
+      console.warn('Error releasing main-thread ONNX session:', err);
+    }
+    cachedSession = null;
+    sessionPromise = null;
+  }
+}
+
 export async function segmentFloorplanMlBrowser(
   rgba: Uint8ClampedArray | Uint8Array,
   w: number,
@@ -203,6 +350,20 @@ export async function segmentFloorplanMlBrowser(
   ocrTextBoxes: OcrTextBoxPx[] = [],
   modelUrl = DEFAULT_MODEL_URL
 ): Promise<SegmentationMasks> {
+  if (typeof window !== 'undefined' && typeof Worker !== 'undefined') {
+    const worker = getOrCreateWorker();
+    const id = msgId++;
+    const rawRgba = rgba instanceof Uint8Array ? rgba : new Uint8Array(rgba);
+    return new Promise((resolve, reject) => {
+      pendingCallbacks.set(id, { resolve, reject });
+      worker.postMessage({
+        id,
+        type: 'SEGMENT',
+        payload: { rgba: rawRgba, w, h, options, ocrTextBoxes, modelUrl },
+      });
+    });
+  }
+
   const session = await getBrowserMlSession(modelUrl);
   const inputData = prepareModelInputTensor(rgba, w, h, ML_MODEL_INPUT_SIZE);
   const inputTensor = new ort.Tensor('float32', inputData, [
