@@ -758,7 +758,8 @@ export const PropertiesPanel: React.FC<Props> = ({
             <div className="flex justify-between items-center mb-1">
               <label className="field-label mb-0">Dimensions</label>
               <button
-                className="text-xs text-blue-600 hover:text-blue-800 font-medium cursor-pointer"
+                type="button"
+                className="btn-text text-xs text-blue-600 hover:text-blue-800 font-medium cursor-pointer"
                 onClick={() => {
                   const rawLines = (selectedTextBox.text || '').split('\n');
                   const maxLineLen = Math.max(...rawLines.map((l) => l.length), 4);
@@ -889,20 +890,32 @@ export const PropertiesPanel: React.FC<Props> = ({
             <div className="field-group">
               <label className="field-label">Wall Thickness</label>
               <div className="flex gap-2">
-                {[10, 15, 20].map((t) => (
+                {(state.unit === 'm'
+                  ? [
+                      { label: '10 cm', val: 10 },
+                      { label: '15 cm', val: 15 },
+                      { label: '20 cm', val: 20 },
+                    ]
+                  : [
+                      { label: '4"', val: 10.16 },
+                      { label: '6"', val: 15.24 },
+                      { label: '8"', val: 20.32 },
+                    ]
+                ).map(({ label, val }) => (
                   <button
-                    key={t}
-                    className={`btn-secondary flex-1 ${selectedWall.thickness === t ? 'active' : ''}`}
+                    key={label}
+                    type="button"
+                    className={`btn-secondary flex-1 ${Math.abs(selectedWall.thickness - val) < 0.5 ? 'active' : ''}`}
                     onClick={() =>
                       setState((prev) => ({
                         ...prev,
                         walls: prev.walls.map((w) =>
-                          w.id === selectedWall.id ? { ...w, thickness: t } : w
+                          w.id === selectedWall.id ? { ...w, thickness: Math.round(val) } : w
                         ),
                       }))
                     }
                   >
-                    {t} cm
+                    {label}
                   </button>
                 ))}
               </div>
@@ -956,40 +969,47 @@ export const PropertiesPanel: React.FC<Props> = ({
           </div>
 
           <div className="field-group">
-            <label className="field-label">Door Width ({state.unit === 'm' ? 'cm' : 'in'})</label>
-            <div className="flex gap-2">
-              <input
-                type="number"
-                min="30"
-                max="300"
-                value={selectedDoor.width}
-                onChange={(e) => {
-                  const val = parseInt(e.target.value);
-                  if (!isNaN(val) && val > 0) {
-                    setState((prev) => ({
-                      ...prev,
-                      doors: prev.doors.map((d) =>
-                        d.id === selectedDoor.id ? { ...d, width: val } : d
-                      ),
-                    }));
-                  }
-                }}
-                className="field-input flex-1"
-              />
-              {[75, 80, 90].map((w) => (
+            <PropDimInput
+              label="Door Width"
+              valueCm={selectedDoor.width}
+              unit={state.unit}
+              minCm={30}
+              onChange={(w) =>
+                setState((prev) => ({
+                  ...prev,
+                  doors: prev.doors.map((d) =>
+                    d.id === selectedDoor.id ? { ...d, width: w } : d
+                  ),
+                }))
+              }
+            />
+            <div className="flex gap-2 mt-2">
+              {(state.unit === 'm'
+                ? [
+                    { label: '75 cm', val: 75 },
+                    { label: '80 cm', val: 80 },
+                    { label: '90 cm', val: 90 },
+                  ]
+                : [
+                    { label: '30"', val: 76.2 },
+                    { label: '32"', val: 81.28 },
+                    { label: '36"', val: 91.44 },
+                  ]
+              ).map(({ label, val }) => (
                 <button
-                  key={w}
-                  className={`btn-secondary ${selectedDoor.width === w ? 'active' : ''}`}
+                  key={label}
+                  type="button"
+                  className={`btn-secondary flex-1 text-xs ${Math.abs(selectedDoor.width - val) < 0.5 ? 'active' : ''}`}
                   onClick={() =>
                     setState((prev) => ({
                       ...prev,
                       doors: prev.doors.map((d) =>
-                        d.id === selectedDoor.id ? { ...d, width: w } : d
+                        d.id === selectedDoor.id ? { ...d, width: Math.round(val) } : d
                       ),
                     }))
                   }
                 >
-                  {w}
+                  {label}
                 </button>
               ))}
             </div>
@@ -1052,40 +1072,47 @@ export const PropertiesPanel: React.FC<Props> = ({
           </div>
 
           <div className="field-group">
-            <label className="field-label">Window Width ({state.unit === 'm' ? 'cm' : 'in'})</label>
-            <div className="flex gap-2">
-              <input
-                type="number"
-                min="30"
-                max="500"
-                value={selectedWindow.width}
-                onChange={(e) => {
-                  const val = parseInt(e.target.value);
-                  if (!isNaN(val) && val > 0) {
-                    setState((prev) => ({
-                      ...prev,
-                      windows: prev.windows.map((win) =>
-                        win.id === selectedWindow.id ? { ...win, width: val } : win
-                      ),
-                    }));
-                  }
-                }}
-                className="field-input flex-1"
-              />
-              {[100, 140, 180].map((w) => (
+            <PropDimInput
+              label="Window Width"
+              valueCm={selectedWindow.width}
+              unit={state.unit}
+              minCm={30}
+              onChange={(w) =>
+                setState((prev) => ({
+                  ...prev,
+                  windows: prev.windows.map((win) =>
+                    win.id === selectedWindow.id ? { ...win, width: w } : win
+                  ),
+                }))
+              }
+            />
+            <div className="flex gap-2 mt-2">
+              {(state.unit === 'm'
+                ? [
+                    { label: '100 cm', val: 100 },
+                    { label: '140 cm', val: 140 },
+                    { label: '180 cm', val: 180 },
+                  ]
+                : [
+                    { label: '36"', val: 91.44 },
+                    { label: '48"', val: 121.92 },
+                    { label: '60"', val: 152.4 },
+                  ]
+              ).map(({ label, val }) => (
                 <button
-                  key={w}
-                  className={`btn-secondary ${selectedWindow.width === w ? 'active' : ''}`}
+                  key={label}
+                  type="button"
+                  className={`btn-secondary flex-1 text-xs ${Math.abs(selectedWindow.width - val) < 0.5 ? 'active' : ''}`}
                   onClick={() =>
                     setState((prev) => ({
                       ...prev,
                       windows: prev.windows.map((win) =>
-                        win.id === selectedWindow.id ? { ...win, width: w } : win
+                        win.id === selectedWindow.id ? { ...win, width: Math.round(val) } : win
                       ),
                     }))
                   }
                 >
-                  {w}
+                  {label}
                 </button>
               ))}
             </div>
@@ -1140,80 +1167,87 @@ export const PropertiesPanel: React.FC<Props> = ({
             Select any furniture, wall, door, or window on the canvas to inspect dimensions, rotate,
             or customize colors.
           </p>
-          {state.background && (
-            <div className="stats-box mt-6">
-              <span className="stats-header">Imported Floorplan Underlay</span>
-              <div className="field-group mt-2">
-                <div className="flex justify-between items-center">
-                  <span className="text-xs text-slate-600">Opacity</span>
-                  <span className="text-xs font-mono font-semibold">
-                    {Math.round(state.background.opacity * 100)}%
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min="0.1"
-                  max="0.95"
-                  step="0.05"
-                  value={state.background.opacity}
-                  onChange={(e) =>
-                    setState((prev) =>
-                      prev.background
-                        ? {
-                            ...prev,
-                            background: {
-                              ...prev.background,
-                              opacity: parseFloat(e.target.value),
-                            },
-                          }
-                        : prev
-                    )
-                  }
-                  className="slider-range"
-                />
+        </div>
+      )}
+
+      {state.background && (
+        <div className="inspector-content">
+          <div className="divider" />
+          <div className="stats-box">
+            <span className="stats-header">Imported Floorplan Underlay</span>
+            <div className="field-group mt-2">
+              <div className="flex justify-between items-center">
+                <span className="text-xs text-slate-600">Opacity</span>
+                <span className="text-xs font-mono font-semibold">
+                  {Math.round(state.background.opacity * 100)}%
+                </span>
               </div>
-
-              <div className="flex flex-col gap-2 mt-3">
-                <button
-                  className="btn-secondary w-full"
-                  onClick={() =>
-                    setState((prev) =>
-                      prev.background
-                        ? {
-                            ...prev,
-                            background: {
-                              ...prev.background,
-                              visible: !prev.background.visible,
-                            },
-                          }
-                        : prev
-                    )
-                  }
-                >
-                  {state.background.visible ? <EyeOff size={14} /> : <Eye size={14} />}
-                  <span>{state.background.visible ? 'Hide Underlay' : 'Show Underlay'}</span>
-                </button>
-
-                {setTool && (
-                  <button
-                    className="btn-secondary w-full"
-                    onClick={() => setTool('calibrate')}
-                  >
-                    <Ruler size={14} />
-                    <span>Calibrate Scale on Wall</span>
-                  </button>
-                )}
-
-                <button
-                  className="btn-danger w-full"
-                  onClick={() => setState((prev) => ({ ...prev, background: null }))}
-                >
-                  <Trash2 size={14} />
-                  <span>Remove Underlay</span>
-                </button>
-              </div>
+              <input
+                type="range"
+                min="0.1"
+                max="0.95"
+                step="0.05"
+                value={state.background.opacity}
+                onChange={(e) =>
+                  setState((prev) =>
+                    prev.background
+                      ? {
+                          ...prev,
+                          background: {
+                            ...prev.background,
+                            opacity: parseFloat(e.target.value),
+                          },
+                        }
+                      : prev
+                  )
+                }
+                className="slider-range"
+              />
             </div>
-          )}
+
+            <div className="flex flex-col gap-2 mt-3">
+              <button
+                type="button"
+                className="btn-secondary w-full"
+                onClick={() =>
+                  setState((prev) =>
+                    prev.background
+                      ? {
+                          ...prev,
+                          background: {
+                            ...prev.background,
+                            visible: !prev.background.visible,
+                          },
+                        }
+                      : prev
+                  )
+                }
+              >
+                {state.background.visible ? <EyeOff size={14} /> : <Eye size={14} />}
+                <span>{state.background.visible ? 'Hide Underlay' : 'Show Underlay'}</span>
+              </button>
+
+              {setTool && (
+                <button
+                  type="button"
+                  className="btn-secondary w-full"
+                  onClick={() => setTool('calibrate')}
+                >
+                  <Ruler size={14} />
+                  <span>Calibrate Scale on Wall</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                className="btn-danger w-full"
+                onClick={() => setState((prev) => ({ ...prev, background: null }))}
+              >
+                <Trash2 size={14} />
+                <span>Remove Underlay</span>
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </aside>

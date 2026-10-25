@@ -470,16 +470,6 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                     <span>Keep current furniture on canvas</span>
                   </label>
                 </div>
-
-                <button
-                  type="button"
-                  className="btn-primary w-full mt-3"
-                  disabled={!parseResult}
-                  onClick={handleApplyImport}
-                >
-                  <Check size={16} />
-                  <span>Generate Floorplan</span>
-                </button>
               </div>
             )}
           </div>

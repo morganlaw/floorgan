@@ -199,7 +199,7 @@ export const App: React.FC = () => {
         <div className="modal-backdrop" onClick={() => setShowHelp(false)}>
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3 className="modal-title">FloorGAN Planner Guide</h3>
+              <h3 className="modal-title">Floorgan Guide</h3>
               <button className="modal-close" onClick={() => setShowHelp(false)}>
                 <X size={18} />
               </button>
@@ -215,24 +215,28 @@ export const App: React.FC = () => {
                   <span>Redo action</span>
                 </div>
                 <div className="shortcut-item">
+                  <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd>
+                  <span>Pan canvas view (or Arrow keys)</span>
+                </div>
+                <div className="shortcut-item">
+                  <kbd>1</kbd> .. <kbd>7</kbd>
+                  <span>Select Tool (1: Select, 2: Wall, 3: Door, 4: Window, 5: Text, 6: Measure, 7: Pan)</span>
+                </div>
+                <div className="shortcut-item">
                   <kbd>V</kbd>
-                  <span>Select & Move Tool (Drag box to multi-select)</span>
-                </div>
-                <div className="shortcut-item">
-                  <kbd>W</kbd>
-                  <span>Draw Wall Mode (Click to start, click to end)</span>
-                </div>
-                <div className="shortcut-item">
-                  <kbd>D</kbd>
-                  <span>Place Door on Wall</span>
+                  <span>Select & Move Tool</span>
                 </div>
                 <div className="shortcut-item">
                   <kbd>T</kbd>
-                  <span>Custom Text Box Tool (Click to place)</span>
+                  <span>Custom Text Box Tool</span>
                 </div>
                 <div className="shortcut-item">
                   <kbd>M</kbd>
                   <span>Measuring Tape Tool</span>
+                </div>
+                <div className="shortcut-item">
+                  <kbd>H</kbd>
+                  <span>Pan Tool</span>
                 </div>
                 <div className="shortcut-item">
                   <kbd>Shift</kbd> + Drag / Click
@@ -248,7 +252,7 @@ export const App: React.FC = () => {
                 </div>
                 <div className="shortcut-item">
                   <kbd>Delete</kbd> / <kbd>⌫</kbd>
-                  <span>Delete selected wall, furniture, door, or window</span>
+                  <span>Delete selected wall, furniture, door, window, or measurement</span>
                 </div>
                 <div className="shortcut-item">
                   <kbd>Esc</kbd>

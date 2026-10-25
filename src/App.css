@@ -41,13 +41,6 @@
   line-height: 1;
 }
 
-.brand-sub {
-  font-size: 11px;
-  font-weight: 500;
-  color: #64748b;
-  display: block;
-}
-
 .divider-vertical {
   width: 1px;
   height: 24px;
@@ -567,31 +560,6 @@
 }
 
 /* Floating Shortcuts Button */
-.floating-help-btn {
-  position: absolute;
-  bottom: 16px;
-  right: 270px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  font-size: 12px;
-  font-weight: 600;
-  background-color: #ffffff;
-  color: #334155;
-  border: 1px solid #cbd5e1;
-  border-radius: 20px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-  cursor: pointer;
-  z-index: 8;
-  transition: all 0.15s ease;
-}
-
-.floating-help-btn:hover {
-  background-color: #f8fafc;
-  color: #0f172a;
-}
-
 /* Shortcuts Modal */
 .modal-backdrop {
   position: fixed;
@@ -824,12 +792,6 @@ kbd {
   gap: 8px;
 }
 
-.import-indicator-icon {
-  color: #38bdf8;
-  flex-shrink: 0;
-  margin-top: 1px;
-}
-
 .import-indicator-text {
   font-size: 12px;
   font-weight: 500;
@@ -1034,71 +996,6 @@ kbd {
   padding: 4px 0;
 }
 
-.parser-settings-disclosure {
-  border-top: 1px solid #e2e8f0;
-  padding-top: 10px;
-}
-
-.parser-disclosure-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  font-weight: 600;
-  color: #64748b;
-  cursor: pointer;
-  user-select: none;
-}
-
-.parser-disclosure-header:hover {
-  color: #0f172a;
-}
-
-.parser-disclosure-body {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 10px;
-  padding-top: 4px;
-}
-
-.parser-settings-card {
-  background-color: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  padding: 10px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.parser-card-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  color: #334155;
-}
-
-.checkbox-inline {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  color: #475569;
-  cursor: pointer;
-}
-
-.parser-toggles {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding-top: 4px;
-  border-top: 1px solid #e2e8f0;
-}
-
 .checkbox-row {
   display: flex;
   align-items: center;
@@ -1106,39 +1003,6 @@ kbd {
   font-size: 11px;
   color: #334155;
   cursor: pointer;
-}
-
-.ocr-status-box {
-  border: 1px solid #d1fae5;
-  background-color: #ecfdf5;
-  border-radius: 8px;
-  padding: 8px 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.ocr-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-
-.ocr-chip {
-  font-size: 11px;
-  font-family: monospace;
-  font-weight: 600;
-  padding: 2px 6px;
-  border-radius: 6px;
-  background-color: #ffffff;
-  color: #334155;
-  border: 1px solid #cbd5e1;
-}
-
-.ocr-chip.matched {
-  background-color: #059669;
-  color: #ffffff;
-  border-color: #047857;
 }
 
 .import-preview-col {
@@ -1340,6 +1204,126 @@ kbd {
 
 .cursor-nesw-resize {
   cursor: nesw-resize;
+}
+
+.cursor-crosshair {
+  cursor: crosshair;
+}
+
+.cursor-text {
+  cursor: text;
+}
+
+.cursor-grabbing {
+  cursor: grabbing;
+}
+
+.active\:cursor-grabbing:active {
+  cursor: grabbing;
+}
+
+.active\:scale-125:active {
+  transform: scale(1.25);
+}
+
+.transition-transform {
+  transition: transform 0.15s ease;
+}
+
+.furniture-preview-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.selection-marquee {
+  pointer-events: none;
+}
+
+.text-emerald-600 {
+  color: #059669;
+}
+
+.text-blue-600 {
+  color: #2563eb;
+}
+
+.hover\:text-blue-800:hover,
+.text-blue-600:hover {
+  color: #1e40af;
+}
+
+.text-slate-300 {
+  color: #cbd5e1;
+}
+
+.text-slate-400 {
+  color: #94a3b8;
+}
+
+.text-slate-500 {
+  color: #64748b;
+}
+
+.text-slate-600 {
+  color: #475569;
+}
+
+.text-slate-700 {
+  color: #334155;
+}
+
+.font-medium {
+  font-weight: 500;
+}
+
+.font-bold {
+  font-weight: 700;
+}
+
+.font-sans {
+  font-family: inherit;
+}
+
+.gap-1 {
+  gap: 4px;
+}
+
+.gap-1\.5 {
+  gap: 6px;
+}
+
+.py-1 {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+.mb-0 {
+  margin-bottom: 0;
+}
+
+.w-16 {
+  width: 64px;
+}
+
+.leading-relaxed {
+  line-height: 1.625;
+}
+
+.btn-text {
+  background: none;
+  border: none;
+  padding: 0;
+  color: #2563eb;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.12s ease;
+}
+
+.btn-text:hover {
+  color: #1d4ed8;
+  text-decoration: underline;
 }
 
 /* Custom catalog items */

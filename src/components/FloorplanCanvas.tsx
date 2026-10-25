@@ -163,25 +163,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
     };
   }, [zoom]);
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'Space' && !['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) {
-        setIsSpacePressed(true);
-      }
-    };
-    const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.code === 'Space') {
-        setIsSpacePressed(false);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-    };
-  }, []);
-
   const handlePointerDown = (e: React.PointerEvent) => {
     if (e.button === 1 || tool === 'pan' || isSpacePressed) {
       setIsPanning(true);
@@ -1096,8 +1077,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
         setSelectedType(null);
         setSelectedIds?.([]);
         setTool('select');
-      } else if (e.key.toLowerCase() === 't' && !e.metaKey && !e.ctrlKey) {
-        setTool('text');
       } else if (
         (e.key === 'Delete' || e.key === 'Backspace') &&
         (selectedId || (selectedIds && selectedIds.length > 0))
@@ -1117,6 +1096,39 @@ export const FloorplanCanvas: React.FC<Props> = ({
         setSelectedId(null);
         setSelectedType(null);
         setSelectedIds?.([]);
+      } else if (!e.metaKey && !e.ctrlKey) {
+        const key = e.key.toLowerCase();
+        if (e.shiftKey && key === 'w') {
+          setTool('wall');
+        } else if (e.shiftKey && key === 'd') {
+          setTool('door');
+        } else if (key === 'w' || e.key === 'ArrowUp') {
+          e.preventDefault();
+          setPan((p) => ({ ...p, y: p.y + 40 }));
+        } else if (key === 's' || e.key === 'ArrowDown') {
+          e.preventDefault();
+          setPan((p) => ({ ...p, y: p.y - 40 }));
+        } else if (key === 'a' || e.key === 'ArrowLeft') {
+          e.preventDefault();
+          setPan((p) => ({ ...p, x: p.x + 40 }));
+        } else if (key === 'd' || e.key === 'ArrowRight') {
+          e.preventDefault();
+          setPan((p) => ({ ...p, x: p.x - 40 }));
+        } else if (key === '1' || key === 'v') {
+          setTool('select');
+        } else if (key === '2') {
+          setTool('wall');
+        } else if (key === '3') {
+          setTool('door');
+        } else if (key === '4') {
+          setTool('window');
+        } else if (key === '5' || key === 't') {
+          setTool('text');
+        } else if (key === '6' || key === 'm') {
+          setTool('measure');
+        } else if (key === '7' || key === 'h') {
+          setTool('pan');
+        }
       }
     };
 
@@ -1132,7 +1144,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [selectedId, selectedIds, selectedType, setState, setSelectedId, setSelectedIds, setSelectedType, setTool]);
+  }, [selectedId, selectedIds, selectedType, setState, setSelectedId, setSelectedIds, setSelectedType, setTool, setPan]);
 
   const toggleOrSelectItem = (clickedId: string, type: SelectedElementType, isShift: boolean) => {
     if (isShift) {
@@ -1178,12 +1190,27 @@ export const FloorplanCanvas: React.FC<Props> = ({
   const selectedWindow = selectedType === 'window' ? state.windows.find((w) => w.id === selectedId) : null;
   const selectedTextBox = selectedType === 'textbox' ? (state.textBoxes || []).find((t) => t.id === selectedId) : null;
 
+  const canvasCursorClass =
+    isPanning || isSpacePressed
+      ? isPanning
+        ? 'cursor-grabbing'
+        : 'cursor-grab'
+      : tool === 'pan'
+      ? isPanning
+        ? 'cursor-grabbing'
+        : 'cursor-grab'
+      : tool === 'wall' || tool === 'door' || tool === 'window' || tool === 'measure' || tool === 'calibrate'
+      ? 'cursor-crosshair'
+      : tool === 'text'
+      ? 'cursor-text'
+      : '';
+
   return (
     <div className="canvas-wrapper">
       <svg
         ref={svgRef}
         id="floorplan-svg"
-        className="floorplan-svg"
+        className={`floorplan-svg ${canvasCursorClass}`}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}

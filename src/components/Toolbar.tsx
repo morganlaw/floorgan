@@ -85,6 +85,9 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           windows: [],
           furniture: [],
           measurements: [],
+          textBoxes: [],
+          roomLabels: [],
+          background: null,
           unit: 'm',
           gridSnap: true,
           gridSize: 20,
@@ -143,7 +146,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         <button
           className={`tool-btn ${tool === 'select' ? 'active' : ''}`}
           onClick={() => setTool('select')}
-          title="Select & Move (V)"
+          title="Select & Move (V or 1)"
         >
           <MousePointer size={18} />
           <span>Select</span>
@@ -152,7 +155,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         <button
           className={`tool-btn ${tool === 'wall' ? 'active' : ''}`}
           onClick={() => setTool('wall')}
-          title="Draw Walls (W) — Click to start, click to end, ESC to cancel"
+          title="Draw Walls (2 or Shift+W) — Click to start, click to end, ESC to cancel"
         >
           <Square size={18} />
           <span>Wall</span>
@@ -161,7 +164,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         <button
           className={`tool-btn ${tool === 'door' ? 'active' : ''}`}
           onClick={() => setTool('door')}
-          title="Draw Door (D) — Click or drag along wall to draft door opening"
+          title="Draw Door (3 or Shift+D) — Click or drag along wall to draft door opening"
         >
           <DoorOpen size={18} />
           <span>Door</span>
@@ -170,7 +173,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         <button
           className={`tool-btn ${tool === 'window' ? 'active' : ''}`}
           onClick={() => setTool('window')}
-          title="Draw Window — Click or drag along wall to draft window opening"
+          title="Draw Window (4) — Click or drag along wall to draft window opening"
         >
           <AppWindow size={18} />
           <span>Window</span>
@@ -179,7 +182,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         <button
           className={`tool-btn ${tool === 'text' ? 'active' : ''}`}
           onClick={() => setTool('text')}
-          title="Text Box (T) — Click canvas to place a custom text box"
+          title="Text Box (T or 5) — Click canvas to place a custom text box"
         >
           <Type size={18} />
           <span>Text</span>
@@ -188,7 +191,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         <button
           className={`tool-btn ${tool === 'measure' ? 'active' : ''}`}
           onClick={() => setTool('measure')}
-          title="Measuring Tape (M)"
+          title="Measuring Tape (M or 6)"
         >
           <Ruler size={18} />
           <span>Measure</span>
@@ -197,7 +200,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         <button
           className={`tool-btn ${tool === 'pan' ? 'active' : ''}`}
           onClick={() => setTool('pan')}
-          title="Pan View (H / Middle Mouse)"
+          title="Pan View (H or 7 / Space / WASD)"
         >
           <Hand size={18} />
           <span>Pan</span>
