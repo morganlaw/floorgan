@@ -1971,6 +1971,77 @@ export async function extractOcrDimensionsFromImage(
   }
 }
 
+export function carveOpeningsFromWalls(
+  walls: Wall[],
+  openings: Array<{ x: number; y: number; width: number; rotation: number }>,
+  minWallLengthCm = 20
+): Wall[] {
+  if (openings.length === 0 || walls.length === 0) return walls;
+  const resultWalls: Wall[] = [];
+  let nextId = 1;
+
+  for (const w of walls) {
+    const isH = Math.abs(w.end.x - w.start.x) >= Math.abs(w.end.y - w.start.y);
+    const pos = isH ? Math.round((w.start.y + w.end.y) / 2) : Math.round((w.start.x + w.end.x) / 2);
+    const wStart = isH ? Math.min(w.start.x, w.end.x) : Math.min(w.start.y, w.end.y);
+    const wEnd = isH ? Math.max(w.start.x, w.end.x) : Math.max(w.start.y, w.end.y);
+    const maxPerpTol = Math.max(w.thickness * 0.75, 18);
+
+    const cuts: Array<{ start: number; end: number }> = [];
+    for (const op of openings) {
+      const opIsH = op.rotation % 180 === 0;
+      if (opIsH !== isH) continue;
+      const opPos = isH ? op.y : op.x;
+      if (Math.abs(opPos - pos) > maxPerpTol) continue;
+
+      const opCoord = isH ? op.x : op.y;
+      const halfW = op.width / 2;
+      const cStart = Math.max(wStart, Math.round(opCoord - halfW));
+      const cEnd = Math.min(wEnd, Math.round(opCoord + halfW));
+      if (cEnd > cStart) cuts.push({ start: cStart, end: cEnd });
+    }
+
+    if (cuts.length === 0) {
+      resultWalls.push(w);
+      continue;
+    }
+
+    cuts.sort((a, b) => a.start - b.start);
+    const mergedCuts = [cuts[0]];
+    for (let i = 1; i < cuts.length; i++) {
+      const prev = mergedCuts[mergedCuts.length - 1];
+      if (cuts[i].start <= prev.end) {
+        prev.end = Math.max(prev.end, cuts[i].end);
+      } else {
+        mergedCuts.push(cuts[i]);
+      }
+    }
+
+    let cur = wStart;
+    for (const cut of mergedCuts) {
+      if (cut.start - cur >= minWallLengthCm) {
+        resultWalls.push({
+          id: `w_imp_${nextId++}`,
+          start: isH ? { x: cur, y: pos } : { x: pos, y: cur },
+          end: isH ? { x: cut.start, y: pos } : { x: pos, y: cut.start },
+          thickness: w.thickness,
+        });
+      }
+      cur = Math.max(cur, cut.end);
+    }
+    if (wEnd - cur >= minWallLengthCm) {
+      resultWalls.push({
+        id: `w_imp_${nextId++}`,
+        start: isH ? { x: cur, y: pos } : { x: pos, y: cur },
+        end: isH ? { x: wEnd, y: pos } : { x: pos, y: wEnd },
+        thickness: w.thickness,
+      });
+    }
+  }
+
+  return resultWalls;
+}
+
 export function regularizeFloorplanGraph(
   segmentsCm: RawSegment[],
   rawBinaryMask: Uint8Array | null,
@@ -2579,10 +2650,11 @@ export function regularizeFloorplanGraph(
           });
         }
 
-        prev.end = curr.end;
-        prev.posWeight += curr.posWeight;
-        prev.thickWeight += curr.thickWeight;
-        prev.totalLen += curr.totalLen;
+        const opWidth = isWindowSpan ? formatWindowWidth(gapWidth) : formatDoorWidth(gapWidth);
+        const halfOp = Math.round(opWidth / 2);
+        prev.end = Math.min(prev.end, gapCenter - halfOp);
+        curr.start = Math.max(curr.start, gapCenter + halfOp);
+        bridged.push(curr);
       } else {
         bridged.push(curr);
       }
@@ -3669,7 +3741,8 @@ export function regularizeFloorplanGraph(
     }
   }
 
-  return { walls, doors, windows };
+  const cleanedWalls = carveOpeningsFromWalls(walls, [...doors, ...windows]);
+  return { walls: cleanedWalls, doors, windows };
 }
 
 export function segmentFloorplanOtsu(
@@ -3958,17 +4031,7 @@ export function parseFloorplanRgbaBuffer(
 
   const spanPxW = Math.max(50, maxPxX - minPxX);
 
-  let wallTraceMask = structuralMask;
-  if (masks.doorMask || masks.windowMask) {
-    wallTraceMask = new Uint8Array(w * h);
-    const dm = masks.doorMask;
-    const wm = masks.windowMask;
-    for (let i = 0; i < w * h; i++) {
-      if (structuralMask[i] || (dm && dm[i]) || (wm && wm[i])) {
-        wallTraceMask[i] = 1;
-      }
-    }
-  }
+  const wallTraceMask = structuralMask;
 
   const rawSegmentsPx = extractDirectionalWallSegments(
     wallTraceMask,
