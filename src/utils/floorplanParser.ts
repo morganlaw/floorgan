@@ -117,6 +117,7 @@ export interface HeuristicConfig {
   doubleLineMaxGapPx: number;
     exteriorBlockerMaxDistPx: number;
     rejectWindowIfDoorSwing: boolean;
+    requireDoorSwingForMlDoors: boolean;
 }
 
 export const DEFAULT_HEURISTIC_CONFIG: HeuristicConfig = {
@@ -131,6 +132,7 @@ export const DEFAULT_HEURISTIC_CONFIG: HeuristicConfig = {
   doubleLineMaxGapPx: 3,
   exteriorBlockerMaxDistPx: 550,
   rejectWindowIfDoorSwing: true,
+  requireDoorSwingForMlDoors: true,
 };
 
 let activeHeuristicConfig: HeuristicConfig = { ...DEFAULT_HEURISTIC_CONFIG };
@@ -1542,6 +1544,7 @@ function matchDimensionsToPixelWalls(
     };
   }
 
+  const maxRayBridgeGapPx = Math.max(110, Math.round(spanPxW * 0.22));
   const bridgeWallGapsForRays = (segs: RawSegment[]): RawSegment[] => {
     const out = [...segs];
     for (let i = 0; i < segs.length; i++) {
@@ -1551,7 +1554,11 @@ function matchDimensionsToPixelWalls(
         if (i === j) continue;
         const b = segs[j];
         if (b.end - b.start < 12) continue;
-        if (Math.abs(a.pos - b.pos) <= 8 && b.start > a.end && b.start - a.end <= 62) {
+        if (
+          Math.abs(a.pos - b.pos) <= 8 &&
+          b.start > a.end &&
+          b.start - a.end <= maxRayBridgeGapPx
+        ) {
           out.push({
             axis: a.axis,
             pos: (a.pos + b.pos) / 2,
@@ -1650,8 +1657,23 @@ function matchDimensionsToPixelWalls(
         }
       }
 
-      const roomW = leftX !== null && rightX !== null ? rightX - leftX : 0;
-      const roomH = topWall && bottomWall ? bottomWall.pos - topWall.pos : 0;
+      // Room dimension labels denote the interior clear span (face-to-face),
+      // not the wall centerline distance, so subtract half of each bounding
+      // wall's thickness. When a side was inferred from wall endpoints (no
+      // explicit perpendicular wall), fall back to the opposite axis' average.
+      const hThickAvg =
+        topWall && bottomWall ? (topWall.thickness + bottomWall.thickness) / 2 : 0;
+      const vThickAvg =
+        leftWall && rightWall ? (leftWall.thickness + rightWall.thickness) / 2 : hThickAvg;
+      const leftHalfT = (leftWall ? leftWall.thickness : vThickAvg || hThickAvg) / 2;
+      const rightHalfT = (rightWall ? rightWall.thickness : vThickAvg || hThickAvg) / 2;
+      const topHalfT = topWall ? topWall.thickness / 2 : 0;
+      const bottomHalfT = bottomWall ? bottomWall.thickness / 2 : 0;
+
+      const roomW =
+        leftX !== null && rightX !== null ? rightX - leftX - leftHalfT - rightHalfT : 0;
+      const roomH =
+        topWall && bottomWall ? bottomWall.pos - topWall.pos - topHalfT - bottomHalfT : 0;
 
       if (roomW > 30 && roomH > 30) {
         const directRatioX = cand.val1Cm / roomW;
@@ -1737,7 +1759,9 @@ function matchDimensionsToPixelWalls(
       }
 
       if (bestWall) {
-        const lenPx = bestWall.end - bestWall.start;
+        const rawLenPx = bestWall.end - bestWall.start;
+        const lenPx =
+          rawLenPx > bestWall.thickness * 4 ? rawLenPx - bestWall.thickness : rawLenPx;
         const scale = cand.val1Cm / lenPx;
         if (scale >= 0.2 && scale <= 15) {
           verifiedRooms.push({
@@ -2354,6 +2378,71 @@ export function regularizeFloorplanGraph(
     }
     if (structBlockedCols >= 3) return false;
     return nearLineThinPixels >= 2 && swingZoneThinPixels >= 4 && thinPixels >= 8;
+  }
+
+  /**
+   * Checks whether an ML door blob or wall gap actually contains drawn door
+   * graphics (a swing arc/leaf outside the wall or a threshold/sliding panel
+   * inside the opening) rather than being an empty open passage / archway.
+   */
+  function hasDoorGraphicInOpening(
+    axis: 'h' | 'v',
+    posCm: number,
+    startCm: number,
+    endCm: number,
+    thicknessCm: number
+  ): boolean {
+    if (!rawBinaryMask || cmPerPx <= 0) return true;
+    const posScale = axis === 'h' ? cmPerPxY : cmPerPxX;
+    const spanScale = axis === 'h' ? cmPerPxX : cmPerPxY;
+    const pxPos = Math.round(posCm / posScale);
+    const pxStart = Math.round(Math.min(startCm, endCm) / spanScale);
+    const pxEnd = Math.round(Math.max(startCm, endCm) / spanScale);
+    const span = pxEnd - pxStart;
+    if (span < 6) return false;
+
+    // Step slightly inside the jambs so 1-2px of wall end-caps where the ML
+    // door mask overlaps the wall aren't mistaken for door graphics.
+    const pad = Math.min(4, Math.max(2, Math.floor(span * 0.12)));
+    const t0 = pxStart + pad;
+    const t1 = pxEnd - pad;
+    if (t1 < t0) return true;
+
+    const halfT = Math.max(2, Math.round(thicknessCm / posScale / 2));
+    const searchDepth = Math.min(68, Math.max(14, Math.round(span * 1.05)));
+
+    let interiorGapCols = 0;
+    let swingZoneCols = 0;
+    let totalThinPixels = 0;
+
+    for (let t = t0; t <= t1; t++) {
+      let colInGap = false;
+      let colInSwing = false;
+      for (let d = -searchDepth; d <= searchDepth; d++) {
+        const rx = axis === 'h' ? t : pxPos + d;
+        const ry = axis === 'h' ? pxPos + d : t;
+        if (rx < 0 || rx >= maskWidth || ry < 0 || ry >= maskHeight) continue;
+        const idx = ry * maskWidth + rx;
+        const isStruct = structuralMask ? structuralMask[idx] === 1 : false;
+        if (!isStruct && rawBinaryMask[idx] !== 0) {
+          totalThinPixels++;
+          if (Math.abs(d) <= halfT + 2) {
+            colInGap = true;
+          } else {
+            colInSwing = true;
+          }
+        }
+      }
+      if (colInGap) interiorGapCols++;
+      if (colInSwing) swingZoneCols++;
+    }
+
+    const interiorSpan = t1 - t0 + 1;
+    const minCols = Math.max(3, Math.round(interiorSpan * 0.15));
+    return (
+      totalThinPixels >= 6 &&
+      (swingZoneCols >= minCols || interiorGapCols >= minCols)
+    );
   }
 
     function extendSpanThroughStructuralPiers(
@@ -3702,17 +3791,18 @@ export function regularizeFloorplanGraph(
       };
     };
 
+    const openPassages: Array<{
+      x: number;
+      y: number;
+      width: number;
+      rotation: number;
+    }> = [];
+
     if (mlDoorMask) {
       const doorBlobs = extractComponentsFromMask(mlDoorMask, 8);
       for (const blob of doorBlobs) {
         const snapped = snapBlobToBestWall(blob);
         if (!snapped) continue;
-        const swing = inferDoorSwingAndRotation(
-          snapped.axis,
-          snapped.posCm,
-          snapped.startCm,
-          snapped.endCm
-        );
         const xCm = Math.round(
           (snapped.axis === 'h' ? snapped.centerCm : snapped.posCm) +
             ORIGIN_OFFSET_X
@@ -3720,6 +3810,33 @@ export function regularizeFloorplanGraph(
         const yCm = Math.round(
           (snapped.axis === 'h' ? snapped.posCm : snapped.centerCm) +
             ORIGIN_OFFSET_Y
+        );
+        // The segmentation model tends to label any wall gap between rooms as
+        // a door. Without a drawn swing arc or door leaf/panel, the gap is an
+        // open passage, so carve the wall opening without inserting a door.
+        if (
+          activeHeuristicConfig.requireDoorSwingForMlDoors &&
+          !hasDoorGraphicInOpening(
+            snapped.axis,
+            snapped.posCm,
+            snapped.startCm,
+            snapped.endCm,
+            snapped.thicknessCm
+          )
+        ) {
+          openPassages.push({
+            x: xCm,
+            y: yCm,
+            width: Math.max(30, Math.min(240, Math.round(snapped.widthCm))),
+            rotation: snapped.axis === 'h' ? 0 : 90,
+          });
+          continue;
+        }
+        const swing = inferDoorSwingAndRotation(
+          snapped.axis,
+          snapped.posCm,
+          snapped.startCm,
+          snapped.endCm
         );
         const isDuplicate = doors.some(
           (d) => Math.hypot(d.x - xCm, d.y - yCm) <= pxToCm(8)
@@ -3766,6 +3883,12 @@ export function regularizeFloorplanGraph(
           });
         }
       }
+    }
+
+    if (openPassages.length > 0) {
+      const carvedPassages = carveOpeningsFromWalls(walls, openPassages);
+      walls.length = 0;
+      walls.push(...carvedPassages);
     }
   }
 
