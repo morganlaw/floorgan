@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { X } from 'lucide-react';
 import { FloorplanState, SelectedElementType, ToolMode } from './types';
 import { TEMPLATES } from './templates';
 import { Toolbar } from './components/Toolbar';
@@ -7,7 +8,6 @@ import { FloorplanCanvas } from './components/FloorplanCanvas';
 import { PropertiesPanel } from './components/PropertiesPanel';
 import { ImportModal } from './components/ImportModal';
 import { useFloorplanHistory } from './utils/useHistory';
-import { X } from 'lucide-react';
 import './App.css';
 
 const STORAGE_KEY = 'floorgan_floorplan_v1';
@@ -42,12 +42,10 @@ export const App: React.FC = () => {
     endInteraction,
   } = useFloorplanHistory(getInitialFloorplan());
 
-  // Automatically persist state changes to browser localStorage
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    } catch (e) {
-      // Fallback if background dataUrl exceeds localStorage quota
+    } catch {
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, background: null }));
       } catch (innerErr) {
@@ -61,13 +59,11 @@ export const App: React.FC = () => {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [selectedType, setSelectedType] = useState<SelectedElementType>(null);
 
-  // View state
   const [zoom, setZoom] = useState<number>(0.9);
   const [pan, setPan] = useState<{ x: number; y: number }>({ x: 140, y: 100 });
   const [showHelp, setShowHelp] = useState<boolean>(false);
   const [showImportModal, setShowImportModal] = useState<boolean>(false);
 
-  // Auto-deselect if selected element no longer exists (e.g. after undo)
   useEffect(() => {
     if (!selectedId && selectedIds.length === 0) return;
     const allExistingIds = new Set([
@@ -95,7 +91,6 @@ export const App: React.FC = () => {
     }
   }, [state, selectedId, selectedIds]);
 
-  // Global keyboard shortcuts for Undo / Redo
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
@@ -128,7 +123,6 @@ export const App: React.FC = () => {
 
   return (
     <div className="app-container">
-      {/* Top Application Toolbar */}
       <Toolbar
         tool={tool}
         setTool={setTool}
@@ -147,9 +141,7 @@ export const App: React.FC = () => {
         canRedo={canRedo}
       />
 
-      {/* Main Workspace */}
       <div className="workspace">
-        {/* Left Furniture & Fixtures Catalog */}
         <Sidebar
           state={state}
           setState={setState}
@@ -157,7 +149,6 @@ export const App: React.FC = () => {
           setSelectedType={setSelectedType}
         />
 
-        {/* Center Canvas */}
         <FloorplanCanvas
           state={state}
           setState={setState}
@@ -177,7 +168,6 @@ export const App: React.FC = () => {
           onEndInteraction={endInteraction}
         />
 
-        {/* Right Properties Inspector */}
         <PropertiesPanel
           state={state}
           setState={setState}
@@ -191,7 +181,6 @@ export const App: React.FC = () => {
         />
       </div>
 
-      {/* Floorplan Image & URL Importer Modal */}
       <ImportModal
         isOpen={showImportModal}
         onClose={() => setShowImportModal(false)}
@@ -206,8 +195,6 @@ export const App: React.FC = () => {
         }}
       />
 
-
-      {/* Shortcuts & Guide Modal */}
       {showHelp && (
         <div className="modal-backdrop" onClick={() => setShowHelp(false)}>
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>

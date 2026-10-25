@@ -129,18 +129,17 @@ export const PropertiesPanel: React.FC<Props> = ({
   const selectedMeasurementsCount = state.measurements.filter((m) => selectedIds.includes(m.id)).length;
 
   const colors = [
-    '#334155', // Slate
-    '#475569', // Steel
-    '#6366f1', // Indigo
-    '#0284c7', // Sky
-    '#0f766e', // Teal
-    '#15803d', // Green
-    '#b45309', // Amber / Wood
-    '#78350f', // Dark Wood
-    '#dc2626', // Crimson
+    '#334155',
+    '#475569',
+    '#6366f1',
+    '#0284c7',
+    '#0f766e',
+    '#15803d',
+    '#b45309',
+    '#78350f',
+    '#dc2626',
   ];
 
-  // Furniture handlers
   const updateFurniture = (updates: Partial<PlacedFurniture>) => {
     if (!selectedId) return;
     setState((prev) => ({
@@ -149,7 +148,6 @@ export const PropertiesPanel: React.FC<Props> = ({
     }));
   };
 
-  // Text box handlers
   const updateTextBox = (updates: Partial<TextBoxItem>) => {
     if (!selectedId) return;
     setState((prev) => ({
@@ -251,7 +249,6 @@ export const PropertiesPanel: React.FC<Props> = ({
       const nextWindows = [...prev.windows];
       const nextMeasurements = [...prev.measurements];
 
-      // Duplicate furniture
       prev.furniture.forEach((f, idx) => {
         if (selectedIds.includes(f.id)) {
           const newId = `furn_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 6)}`;
@@ -265,7 +262,6 @@ export const PropertiesPanel: React.FC<Props> = ({
         }
       });
 
-      // Duplicate text boxes
       (prev.textBoxes || []).forEach((t, idx) => {
         if (selectedIds.includes(t.id)) {
           const newId = `text_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 6)}`;
@@ -279,7 +275,6 @@ export const PropertiesPanel: React.FC<Props> = ({
         }
       });
 
-      // Duplicate walls
       prev.walls.forEach((w, idx) => {
         if (selectedIds.includes(w.id)) {
           const newId = `wall_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 6)}`;
@@ -293,7 +288,6 @@ export const PropertiesPanel: React.FC<Props> = ({
         }
       });
 
-      // Duplicate doors
       prev.doors.forEach((d, idx) => {
         if (selectedIds.includes(d.id)) {
           const newId = `door_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 6)}`;
@@ -307,7 +301,6 @@ export const PropertiesPanel: React.FC<Props> = ({
         }
       });
 
-      // Duplicate windows
       prev.windows.forEach((win, idx) => {
         if (selectedIds.includes(win.id)) {
           const newId = `win_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 6)}`;
@@ -321,7 +314,6 @@ export const PropertiesPanel: React.FC<Props> = ({
         }
       });
 
-      // Duplicate measurements
       prev.measurements.forEach((m, idx) => {
         if (selectedIds.includes(m.id)) {
           const newId = `meas_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 6)}`;
@@ -442,7 +434,6 @@ export const PropertiesPanel: React.FC<Props> = ({
         <h3 className="panel-title">Inspector</h3>
       </div>
 
-      {/* Multi-Selection Inspector */}
       {isMultiSelect && (
         <div className="inspector-content">
           <div className="info-card">
@@ -502,7 +493,6 @@ export const PropertiesPanel: React.FC<Props> = ({
 
           <div className="divider" />
 
-          {/* Batch Actions */}
           <div className="flex flex-col gap-2">
             <button
               className="btn-secondary w-full"
@@ -536,7 +526,6 @@ export const PropertiesPanel: React.FC<Props> = ({
         </div>
       )}
 
-      {/* Selected Furniture Inspector */}
       {!isMultiSelect && selectedFurniture && (
         <div className="inspector-content">
           <div className="field-group">
@@ -549,7 +538,6 @@ export const PropertiesPanel: React.FC<Props> = ({
             />
           </div>
 
-          {/* Custom object shape */}
           {selectedFurniture.shape && (
             <div className="field-group">
               <label className="field-label">
@@ -573,7 +561,6 @@ export const PropertiesPanel: React.FC<Props> = ({
             </div>
           )}
 
-          {/* Dimensions */}
           <div className="field-row">
             <PropDimInput
               label="Width"
@@ -591,7 +578,6 @@ export const PropertiesPanel: React.FC<Props> = ({
             />
           </div>
 
-          {/* Rotation Control */}
           <div className="field-group">
             <div className="flex justify-between items-center mb-1">
               <label className="field-label">Rotation</label>
@@ -618,7 +604,6 @@ export const PropertiesPanel: React.FC<Props> = ({
             </div>
           </div>
 
-          {/* Color Palette */}
           <div className="field-group">
             <label className="field-label">Finish / Color</label>
             <div className="color-palette">
@@ -633,7 +618,6 @@ export const PropertiesPanel: React.FC<Props> = ({
             </div>
           </div>
 
-          {/* Layer Ordering */}
           <div className="field-group">
             <label className="field-label">Z-Order</label>
             <div className="flex gap-2">
@@ -658,7 +642,6 @@ export const PropertiesPanel: React.FC<Props> = ({
 
           <div className="divider" />
 
-          {/* Action buttons */}
           <div className="flex gap-2">
             <button className="btn-secondary flex-1" onClick={handleDuplicate}>
               <Copy size={15} />
@@ -672,7 +655,6 @@ export const PropertiesPanel: React.FC<Props> = ({
         </div>
       )}
 
-      {/* Selected Text Box Inspector */}
       {!isMultiSelect && selectedTextBox && (
         <div className="inspector-content">
           <div className="field-group">
@@ -693,7 +675,6 @@ export const PropertiesPanel: React.FC<Props> = ({
             />
           </div>
 
-          {/* Typography & Style controls */}
           <div className="field-group">
             <label className="field-label">Typography</label>
             <div className="flex gap-2 items-center">
@@ -733,7 +714,6 @@ export const PropertiesPanel: React.FC<Props> = ({
             </div>
           </div>
 
-          {/* Text Color */}
           <div className="field-group">
             <label className="field-label">Text Color</label>
             <div className="color-palette">
@@ -748,7 +728,6 @@ export const PropertiesPanel: React.FC<Props> = ({
             </div>
           </div>
 
-          {/* Background Fill */}
           <div className="field-group">
             <label className="field-label">Background</label>
             <div className="color-palette">
@@ -775,7 +754,6 @@ export const PropertiesPanel: React.FC<Props> = ({
             </div>
           </div>
 
-          {/* Dimensions & Resizing */}
           <div className="field-group">
             <div className="flex justify-between items-center mb-1">
               <label className="field-label mb-0">Dimensions</label>
@@ -815,7 +793,6 @@ export const PropertiesPanel: React.FC<Props> = ({
 
           <div className="divider" />
 
-          {/* Action buttons */}
           <div className="flex gap-2">
             <button className="btn-secondary flex-1" onClick={handleDuplicate}>
               <Copy size={15} />
@@ -829,7 +806,6 @@ export const PropertiesPanel: React.FC<Props> = ({
         </div>
       )}
 
-      {/* Selected Wall Inspector */}
       {!isMultiSelect && selectedWall && (() => {
         const wallLen = distance(selectedWall.start, selectedWall.end);
         const angleRad = Math.atan2(
@@ -848,7 +824,6 @@ export const PropertiesPanel: React.FC<Props> = ({
               </span>
             </div>
 
-            {/* Exact Length Input */}
             <div className="field-group">
               <label className="field-label">Wall Length ({state.unit === 'm' ? 'cm' : 'in'})</label>
               <div className="flex gap-2">
@@ -933,7 +908,6 @@ export const PropertiesPanel: React.FC<Props> = ({
               </div>
             </div>
 
-            {/* Orientation / Rotate Controls */}
             <div className="field-group">
               <label className="field-label">Orientation ({angleDeg}°)</label>
               <div className="flex gap-2">
@@ -958,7 +932,6 @@ export const PropertiesPanel: React.FC<Props> = ({
 
             <div className="divider" />
 
-            {/* Action buttons */}
             <div className="flex gap-2">
               <button className="btn-secondary flex-1" onClick={handleDuplicate}>
                 <Copy size={15} />
@@ -973,7 +946,6 @@ export const PropertiesPanel: React.FC<Props> = ({
         );
       })()}
 
-      {/* Selected Door Inspector */}
       {!isMultiSelect && selectedDoor && (
         <div className="inspector-content">
           <div className="info-card">
@@ -1070,7 +1042,6 @@ export const PropertiesPanel: React.FC<Props> = ({
         </div>
       )}
 
-      {/* Selected Window Inspector */}
       {!isMultiSelect && selectedWindow && (
         <div className="inspector-content">
           <div className="info-card">
@@ -1135,7 +1106,6 @@ export const PropertiesPanel: React.FC<Props> = ({
         </div>
       )}
 
-      {/* Selected Measurement Inspector */}
       {!isMultiSelect && selectedMeasurement && (
         <div className="inspector-content">
           <div className="info-card">
@@ -1162,7 +1132,6 @@ export const PropertiesPanel: React.FC<Props> = ({
         </div>
       )}
 
-      {/* Empty State */}
       {!isMultiSelect && !selectedId && (
         <div className="inspector-empty">
           <Info size={28} className="text-slate-400 mb-2" />

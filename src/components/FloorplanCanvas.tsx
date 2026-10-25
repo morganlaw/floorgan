@@ -88,55 +88,43 @@ export const FloorplanCanvas: React.FC<Props> = ({
 }) => {
   const svgRef = useRef<SVGSVGElement | null>(null);
 
-  // Interaction states
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState<Point>({ x: 0, y: 0 });
   const [isSpacePressed, setIsSpacePressed] = useState(false);
 
-  // Drag selection box state in select mode
   const [selectionBox, setSelectionBox] = useState<{ start: Point; current: Point } | null>(null);
 
-  // Multi-item dragging support
   const [dragStartPoint, setDragStartPoint] = useState<Point | null>(null);
   const [dragInitialPositions, setDragInitialPositions] = useState<{ [id: string]: Point & { endX?: number; endY?: number } }>({});
 
-  // Wall creation
   const [wallStart, setWallStart] = useState<Point | null>(null);
   const [wallCurrent, setWallCurrent] = useState<Point | null>(null);
 
-  // Door creation
   const [doorStart, setDoorStart] = useState<Point | null>(null);
   const [doorCurrent, setDoorCurrent] = useState<Point | null>(null);
 
-  // Window creation
   const [windowStart, setWindowStart] = useState<Point | null>(null);
   const [windowCurrent, setWindowCurrent] = useState<Point | null>(null);
 
-  // Dragging placed item
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState<Point>({ x: 0, y: 0 });
 
-  // Rotating placed item (furniture, doors, windows, textboxes)
   const [isRotating, setIsRotating] = useState(false);
 
-  // Resizing placed item (doors, windows, furniture, textboxes, walls)
   const [resizeTarget, setResizeTarget] = useState<{
     id: string;
     type: 'door' | 'window' | 'furniture' | 'textbox' | 'wall';
     handle: 'left' | 'right' | 'top' | 'bottom' | 'nw' | 'ne' | 'se' | 'sw' | 'start' | 'end';
   } | null>(null);
 
-  // Measure tool
   const [measureStart, setMeasureStart] = useState<Point | null>(null);
   const [measureEnd, setMeasureEnd] = useState<Point | null>(null);
 
-  // Scale calibration tool
   const [calibStart, setCalibStart] = useState<Point | null>(null);
   const [calibEnd, setCalibEnd] = useState<Point | null>(null);
   const [pendingCalibDistCm, setPendingCalibDistCm] = useState<number | null>(null);
   const [calibInputValue, setCalibInputValue] = useState<string>('4.0');
 
-  // Coordinate conversion: Screen pixels -> SVG canvas world coordinates (cm)
   const screenToWorld = useCallback(
     (clientX: number, clientY: number): Point => {
       if (!svgRef.current) return { x: 0, y: 0 };
@@ -175,7 +163,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
     };
   }, [zoom]);
 
-  // Spacebar pan toggle
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'Space' && !['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) {
@@ -195,9 +182,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
     };
   }, []);
 
-  // Pointer down on canvas
   const handlePointerDown = (e: React.PointerEvent) => {
-    // Middle click, Spacebar, or Pan tool triggers pan
     if (e.button === 1 || tool === 'pan' || isSpacePressed) {
       setIsPanning(true);
       setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
@@ -214,7 +199,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
         setWallStart(snappedPoint);
         setWallCurrent(snappedPoint);
       } else {
-        // Place wall
         const finalEnd = snapAngle(wallStart, snappedPoint, state.gridSize, state.gridSnap);
         if (distance(wallStart, finalEnd) > 10) {
           const newWall: Wall = {
@@ -354,7 +338,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
         }
       }
     } else if (tool === 'select') {
-      // Clicked on empty canvas background -> start drag selection box
       setSelectionBox({ start: worldPoint, current: worldPoint });
       if (!e.shiftKey) {
         setSelectedId(null);
@@ -364,7 +347,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
     }
   };
 
-  // Pointer move
   const handlePointerMove = (e: React.PointerEvent) => {
     if (isPanning) {
       setPan({
@@ -401,7 +383,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
       setSelectionBox((prev) => (prev ? { ...prev, current: worldPoint } : null));
     }
 
-    // Dynamic Edge / Width Resizing by dragging handles
     if (resizeTarget && selectedId) {
       if (resizeTarget.type === 'door') {
         const door = state.doors.find((d) => d.id === selectedId);
@@ -506,7 +487,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
           };
 
           if (resizeTarget.handle === 'right') {
-            // Anchor left edge
             const anchorX = tb.x - halfW * ux;
             const anchorY = tb.y - halfW * uy;
             const dist = (worldPoint.x - anchorX) * ux + (worldPoint.y - anchorY) * uy;
@@ -514,7 +494,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
             newCenterX = anchorX + (newWidth / 2) * ux;
             newCenterY = anchorY + (newWidth / 2) * uy;
           } else if (resizeTarget.handle === 'left') {
-            // Anchor right edge
             const anchorX = tb.x + halfW * ux;
             const anchorY = tb.y + halfW * uy;
             const dist = (anchorX - worldPoint.x) * ux + (anchorY - worldPoint.y) * uy;
@@ -522,7 +501,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
             newCenterX = anchorX - (newWidth / 2) * ux;
             newCenterY = anchorY - (newWidth / 2) * uy;
           } else if (resizeTarget.handle === 'bottom') {
-            // Anchor top edge
             const anchorX = tb.x - halfH * vx;
             const anchorY = tb.y - halfH * vy;
             const dist = (worldPoint.x - anchorX) * vx + (worldPoint.y - anchorY) * vy;
@@ -530,7 +508,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
             newCenterX = anchorX + (newHeight / 2) * vx;
             newCenterY = anchorY + (newHeight / 2) * vy;
           } else if (resizeTarget.handle === 'top') {
-            // Anchor bottom edge
             const anchorX = tb.x + halfH * vx;
             const anchorY = tb.y + halfH * vy;
             const dist = (anchorX - worldPoint.x) * vx + (anchorY - worldPoint.y) * vy;
@@ -538,7 +515,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
             newCenterX = anchorX - (newHeight / 2) * vx;
             newCenterY = anchorY - (newHeight / 2) * vy;
           } else if (resizeTarget.handle === 'se') {
-            // Bottom-Right: Anchor Top-Left corner (nw)
             const anchorX = tb.x - halfW * ux - halfH * vx;
             const anchorY = tb.y - halfW * uy - halfH * vy;
             const distX = (worldPoint.x - anchorX) * ux + (worldPoint.y - anchorY) * uy;
@@ -548,7 +524,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
             newCenterX = anchorX + (newWidth / 2) * ux + (newHeight / 2) * vx;
             newCenterY = anchorY + (newWidth / 2) * uy + (newHeight / 2) * vy;
           } else if (resizeTarget.handle === 'sw') {
-            // Bottom-Left: Anchor Top-Right corner (ne)
             const anchorX = tb.x + halfW * ux - halfH * vx;
             const anchorY = tb.y + halfW * uy - halfH * vy;
             const distX = (anchorX - worldPoint.x) * ux + (anchorY - worldPoint.y) * uy;
@@ -558,7 +533,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
             newCenterX = anchorX - (newWidth / 2) * ux + (newHeight / 2) * vx;
             newCenterY = anchorY - (newWidth / 2) * uy + (newHeight / 2) * vy;
           } else if (resizeTarget.handle === 'ne') {
-            // Top-Right: Anchor Bottom-Left corner (sw)
             const anchorX = tb.x - halfW * ux + halfH * vx;
             const anchorY = tb.y - halfW * uy + halfH * vy;
             const distX = (worldPoint.x - anchorX) * ux + (worldPoint.y - anchorY) * uy;
@@ -568,7 +542,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
             newCenterX = anchorX + (newWidth / 2) * ux - (newHeight / 2) * vx;
             newCenterY = anchorY + (newWidth / 2) * uy - (newHeight / 2) * vy;
           } else if (resizeTarget.handle === 'nw') {
-            // Top-Left: Anchor Bottom-Right corner (se)
             const anchorX = tb.x + halfW * ux + halfH * vx;
             const anchorY = tb.y + halfW * uy + halfH * vy;
             const distX = (anchorX - worldPoint.x) * ux + (anchorY - worldPoint.y) * uy;
@@ -627,7 +600,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
       }
     }
 
-    // Dragging placed elements with grid edge-alignment (single or multi-item)
     if (isDragging && !resizeTarget) {
       if (dragStartPoint && Object.keys(dragInitialPositions).length > 1) {
         let dx = worldPoint.x - dragStartPoint.x;
@@ -785,7 +757,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
       }
     }
 
-    // 360-degree free rotation for furniture, doors, windows, textboxes, and walls
     if (isRotating && selectedId) {
       let center: Point | null = null;
       if (selectedType === 'furniture') {
@@ -850,13 +821,11 @@ export const FloorplanCanvas: React.FC<Props> = ({
           if (wall) {
             const len = distance(wall.start, wall.end);
             const half = len / 2;
-            // The rotation handle is perpendicular to the wall axis:
-            // handle angle from center is Math.atan2(dy, dx)
-            // So wall direction is handle angle + 90 deg
+            // Wall axis is perpendicular to handle vector
             const handleAngleRad = Math.atan2(dy, dx);
             let wallAngleRad = handleAngleRad + Math.PI / 2;
             if (e.shiftKey) {
-              const snapInc = Math.PI / 4; // 45 degrees
+              const snapInc = Math.PI / 4;
               wallAngleRad = Math.round(wallAngleRad / snapInc) * snapInc;
             }
             const cos = Math.cos(wallAngleRad);
@@ -894,7 +863,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
     }
   };
 
-  // Pointer up
   const handlePointerUp = (e?: React.PointerEvent | PointerEvent) => {
     if (isDragging || resizeTarget || isRotating || selectionBox) {
       onEndInteraction?.();
@@ -906,7 +874,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
     setDragStartPoint(null);
     setDragInitialPositions({});
 
-    // Finalize drag selection box in select mode
     if (selectionBox) {
       const minX = Math.min(selectionBox.start.x, selectionBox.current.x);
       const maxX = Math.max(selectionBox.start.x, selectionBox.current.x);
@@ -918,7 +885,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
       if (w >= 5 || h >= 5) {
         const boxed: { id: string; type: SelectedElementType }[] = [];
 
-        // Furniture
         for (const f of state.furniture) {
           const hw = f.width / 2;
           const hd = f.depth / 2;
@@ -927,7 +893,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
           }
         }
 
-        // Text boxes
         for (const t of state.textBoxes || []) {
           const hw = t.width / 2;
           const hh = t.height / 2;
@@ -936,7 +901,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
           }
         }
 
-        // Doors
         for (const d of state.doors) {
           const hw = d.width / 2;
           if (d.x + hw >= minX && d.x - hw <= maxX && d.y + hw >= minY && d.y - hw <= maxY) {
@@ -944,7 +908,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
           }
         }
 
-        // Windows
         for (const win of state.windows) {
           const hw = win.width / 2;
           const hh = (win.thickness || 15) / 2;
@@ -953,7 +916,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
           }
         }
 
-        // Walls
         for (const wl of state.walls) {
           const wMinX = Math.min(wl.start.x, wl.end.x);
           const wMaxX = Math.max(wl.start.x, wl.end.x);
@@ -964,7 +926,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
           }
         }
 
-        // Measurements
         for (const m of state.measurements) {
           const mMinX = Math.min(m.start.x, m.end.x);
           const mMaxX = Math.max(m.start.x, m.end.x);
@@ -1004,7 +965,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
       setSelectionBox(null);
     }
 
-    // Finalize drag-drafting for wall
     if (tool === 'wall' && wallStart && wallCurrent) {
       const dist = distance(wallStart, wallCurrent);
       if (dist >= 15) {
@@ -1023,7 +983,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
       }
     }
 
-    // Finalize drag-drafting for door
     if (tool === 'door' && doorStart && doorCurrent) {
       const dist = distance(doorStart, doorCurrent);
       if (dist >= 30) {
@@ -1047,7 +1006,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
       }
     }
 
-    // Finalize drag-drafting for window
     if (tool === 'window' && windowStart && windowCurrent) {
       const dist = distance(windowStart, windowCurrent);
       if (dist >= 30) {
@@ -1090,7 +1048,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
   const handlePointerUpRef = useRef(handlePointerUp);
   handlePointerUpRef.current = handlePointerUp;
 
-  // Global pointer listeners to reliably handle drag, resize, rotate, pan, or marquee selection across window
   useEffect(() => {
     if (!isDragging && !resizeTarget && !isRotating && !isPanning && !selectionBox) return;
     const onWindowPointerMove = (e: PointerEvent) => {
@@ -1107,7 +1064,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
     };
   }, [isDragging, resizeTarget, isRotating, isPanning, selectionBox]);
 
-  // Keyboard shortcuts (Escape, Backspace, Delete, Spacebar pan)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
@@ -1178,7 +1134,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
     };
   }, [selectedId, selectedIds, selectedType, setState, setSelectedId, setSelectedIds, setSelectedType, setTool]);
 
-  // Selection & dragging helper functions for multi-select
   const toggleOrSelectItem = (clickedId: string, type: SelectedElementType, isShift: boolean) => {
     if (isShift) {
       const exists = selectedIds.includes(clickedId);
@@ -1217,7 +1172,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
     }
   };
 
-  // Selected item helpers
   const selectedWall = selectedType === 'wall' ? state.walls.find((w) => w.id === selectedId) : null;
   const selectedFurniture = selectedType === 'furniture' ? state.furniture.find((f) => f.id === selectedId) : null;
   const selectedDoor = selectedType === 'door' ? state.doors.find((d) => d.id === selectedId) : null;
@@ -1235,7 +1189,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
         onPointerUp={handlePointerUp}
       >
         <defs>
-          {/* Minor Grid Pattern (10cm or 20cm) */}
           <pattern
             id="minorGrid"
             width={state.gridSize}
@@ -1249,19 +1202,15 @@ export const FloorplanCanvas: React.FC<Props> = ({
               strokeWidth="0.8"
             />
           </pattern>
-          {/* Major Grid Pattern (100cm = 1m) */}
           <pattern id="majorGrid" width="100" height="100" patternUnits="userSpaceOnUse">
             <rect width="100" height="100" fill="url(#minorGrid)" />
             <path d="M 100 0 L 0 0 0 100" fill="none" stroke="#cbd5e1" strokeWidth="1.5" />
           </pattern>
         </defs>
 
-        {/* Scaled & Panned Group */}
         <g transform={`translate(${pan.x}, ${pan.y}) scale(${zoom})`}>
-          {/* Background Grid */}
           <rect x="-5000" y="-5000" width="10000" height="10000" fill="url(#majorGrid)" />
 
-          {/* Imported Reference Floorplan Underlay */}
           {state.background && state.background.visible && (
             <image
               href={state.background.dataUrl}
@@ -1275,14 +1224,12 @@ export const FloorplanCanvas: React.FC<Props> = ({
             />
           )}
 
-          {/* Coordinate Origin Crosshair */}
           <line x1="-30" y1="0" x2="30" y2="0" stroke="#94a3b8" strokeWidth="1.5" />
           <line x1="0" y1="-30" x2="0" y2="30" stroke="#94a3b8" strokeWidth="1.5" />
           <text x="8" y="-8" fontSize="11" fill="#94a3b8" fontFamily="sans-serif">
             (0, 0)
           </text>
 
-          {/* Placed Walls */}
           {state.walls.map((wall) => {
             const isSelected = selectedId === wall.id || selectedIds.includes(wall.id);
             const wallLength = distance(wall.start, wall.end);
@@ -1309,7 +1256,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                 }}
                 className={tool === 'select' ? 'cursor-move' : 'cursor-pointer'}
               >
-                {/* Invisible wider hit area for easy selection and grabbing */}
                 <line
                   x1={wall.start.x}
                   y1={wall.start.y}
@@ -1318,7 +1264,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   stroke="transparent"
                   strokeWidth={Math.max(wall.thickness + 14, 26)}
                 />
-                {/* Wall body */}
                 <line
                   x1={wall.start.x}
                   y1={wall.start.y}
@@ -1328,7 +1273,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   strokeWidth={wall.thickness}
                   strokeLinecap="square"
                 />
-                {/* Wall centerline accent */}
                 <line
                   x1={wall.start.x}
                   y1={wall.start.y}
@@ -1338,7 +1282,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   strokeWidth="1"
                   strokeDasharray="4 4"
                 />
-                {/* Dimension label */}
                 <g transform={`translate(${midX}, ${midY})`}>
                   <rect
                     x="-28"
@@ -1365,7 +1308,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
             );
           })}
 
-          {/* Wall drawing preview line */}
           {wallStart && wallCurrent && (
             <g>
               <line
@@ -1381,7 +1323,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
               />
               <circle cx={wallStart.x} cy={wallStart.y} r="5" fill="#2563eb" />
               <circle cx={wallCurrent.x} cy={wallCurrent.y} r="5" fill="#2563eb" />
-              {/* Length preview tooltip */}
               <g
                 transform={`translate(${(wallStart.x + wallCurrent.x) / 2}, ${
                   (wallStart.y + wallCurrent.y) / 2
@@ -1410,7 +1351,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
             </g>
           )}
 
-          {/* Door drawing preview */}
           {doorStart && doorCurrent && (
             <g>
               <line
@@ -1452,7 +1392,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
             </g>
           )}
 
-          {/* Window drawing preview */}
           {windowStart && windowCurrent && (
             <g>
               {(() => {
@@ -1480,7 +1419,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
             </g>
           )}
 
-          {/* Doors */}
           {state.doors.map((door) => {
             const isSelected = selectedId === door.id || selectedIds.includes(door.id);
             const halfW = door.width / 2;
@@ -1507,7 +1445,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                 }}
                 className="cursor-move"
               >
-                {/* Wall Opening Cutout */}
                 <rect
                   x={-halfW}
                   y="-10"
@@ -1518,11 +1455,9 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   strokeWidth={isSelected ? '2' : '1'}
                 />
 
-                {/* Jamb Posts on left and right */}
                 <rect x={-halfW} y="-10" width="5" height="20" fill="#334155" />
                 <rect x={halfW - 5} y="-10" width="5" height="20" fill="#334155" />
 
-                {/* Door Swing Arc (Quarter Circle from closed tip to open leaf tip) & Door Leaf */}
                 {isLeft ? (
                   <>
                     <path
@@ -1568,7 +1503,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
             );
           })}
 
-          {/* Windows */}
           {state.windows.map((win) => {
             const isSelected = selectedId === win.id || selectedIds.includes(win.id);
             const halfW = win.width / 2;
@@ -1595,7 +1529,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                 }}
                 className="cursor-move"
               >
-                {/* Wall opening cutout */}
                 <rect
                   x={-halfW}
                   y={-halfT}
@@ -1605,10 +1538,8 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   stroke={isSelected ? '#2563eb' : '#64748b'}
                   strokeWidth={isSelected ? '2' : '1.5'}
                 />
-                {/* Window Jamb Caps */}
                 <line x1={-halfW} y1={-halfT} x2={-halfW} y2={halfT} stroke="#334155" strokeWidth="3" />
                 <line x1={halfW} y1={-halfT} x2={halfW} y2={halfT} stroke="#334155" strokeWidth="3" />
-                {/* Double glass panes */}
                 <line
                   x1={-halfW + 3}
                   y1={-halfT / 3}
@@ -1629,7 +1560,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
             );
           })}
 
-          {/* Furniture items */}
           {state.furniture.map((item) => {
             const isSelected = selectedId === item.id || selectedIds.includes(item.id);
             const halfW = item.width / 2;
@@ -1656,7 +1586,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                 }}
                 className="cursor-move"
               >
-                {/* Custom-created object body (basic shape or freeform polygon) */}
                 {item.shape && (
                   <ShapeBody
                     shape={item.shape}
@@ -1669,7 +1598,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   />
                 )}
 
-                {/* Main furniture body: render for non-chair items or items with full bounding body */}
                 {!item.shape && item.iconType !== 'chair_office' && item.iconType !== 'dining_chair' && (
                   <rect
                     x={-halfW}
@@ -1684,11 +1612,8 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   />
                 )}
 
-                {/* Architectural Internal Detailing */}
-                {/* Sofa */}
                 {(item.iconType === 'sofa' || item.iconType === 'sofa_2') && (
                   <g>
-                    {/* Backrest */}
                     <rect
                       x={-halfW + 6}
                       y={-halfD + 4}
@@ -1698,7 +1623,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                       fill="#0f172a"
                       fillOpacity="0.18"
                     />
-                    {/* Armrests */}
                     <rect
                       x={-halfW + 4}
                       y={-halfD + 6}
@@ -1720,10 +1644,8 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   </g>
                 )}
 
-                {/* Bed */}
                 {(item.iconType === 'bed_double' || item.iconType === 'bed_single') && (
                   <g>
-                    {/* Headboard */}
                     <rect
                       x={-halfW + 4}
                       y={-halfD + 2}
@@ -1733,7 +1655,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                       fill="#1e1b4b"
                       fillOpacity="0.3"
                     />
-                    {/* Pillows */}
                     {item.iconType === 'bed_double' ? (
                       <>
                         <rect
@@ -1769,7 +1690,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                         strokeWidth="1"
                       />
                     )}
-                    {/* Duvet Line */}
                     <line
                       x1={-halfW + 6}
                       y1="0"
@@ -1782,10 +1702,8 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   </g>
                 )}
 
-                {/* Dining Set */}
                 {item.iconType === 'dining_set' && (
                   <g>
-                    {/* Table Surface */}
                     <rect
                       x={-halfW + 16}
                       y={-halfD + 12}
@@ -1798,10 +1716,8 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   </g>
                 )}
 
-                {/* Desk */}
                 {item.iconType === 'desk' && (
                   <g>
-                    {/* Monitor */}
                     <rect
                       x="-25"
                       y={-halfD + 8}
@@ -1810,7 +1726,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                       rx="2"
                       fill="#0f172a"
                     />
-                    {/* Keyboard */}
                     <rect
                       x="-18"
                       y={-halfD + 24}
@@ -1823,10 +1738,8 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   </g>
                 )}
 
-                {/* Armchair */}
                 {item.iconType === 'armchair' && (
                   <g>
-                    {/* Backrest Cushion */}
                     <rect
                       x={-halfW + 12}
                       y={-halfD + 5}
@@ -1836,7 +1749,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                       fill="#0f172a"
                       fillOpacity="0.22"
                     />
-                    {/* Wide Armrests */}
                     <rect
                       x={-halfW + 4}
                       y={-halfD + 6}
@@ -1855,7 +1767,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                       fill="#0f172a"
                       fillOpacity="0.25"
                     />
-                    {/* Seat Cushion */}
                     <rect
                       x={-halfW + 20}
                       y={-halfD + 27}
@@ -1871,10 +1782,8 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   </g>
                 )}
 
-                {/* Office Chair */}
                 {item.iconType === 'chair_office' && (
                   <g>
-                    {/* Hit box area for clicking and dragging */}
                     <rect
                       x={-halfW}
                       y={-halfD}
@@ -1882,7 +1791,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                       height={item.depth}
                       fill="transparent"
                     />
-                    {/* 5-Star Caster Base Spokes */}
                     {[0, 72, 144, 216, 288].map((deg, i) => {
                       const rad = ((deg - 90) * Math.PI) / 180;
                       const r = 26;
@@ -1903,9 +1811,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
                         </g>
                       );
                     })}
-                    {/* Center Swivel Hub */}
                     <circle cx="0" cy="2" r="4.5" fill="#1e293b" />
-                    {/* Seat Cushion */}
                     <rect
                       x="-20"
                       y="-12"
@@ -1916,9 +1822,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
                       stroke={isSelected ? '#2563eb' : '#0f172a'}
                       strokeWidth="1.5"
                     />
-                    {/* Backrest Spine connector */}
                     <line x1="0" y1="-16" x2="0" y2="-12" stroke="#0f172a" strokeWidth="3" />
-                    {/* Curved Backrest */}
                     <rect
                       x="-19"
                       y="-27"
@@ -1929,16 +1833,13 @@ export const FloorplanCanvas: React.FC<Props> = ({
                       stroke={isSelected ? '#2563eb' : '#0f172a'}
                       strokeWidth="1.5"
                     />
-                    {/* Armrest Pads */}
                     <rect x="-26" y="-8" width="5" height="18" rx="2" fill="#1e293b" />
                     <rect x="21" y="-8" width="5" height="18" rx="2" fill="#1e293b" />
                   </g>
                 )}
 
-                {/* Dining Chair */}
                 {item.iconType === 'dining_chair' && (
                   <g>
-                    {/* Hit box */}
                     <rect
                       x={-halfW}
                       y={-halfD}
@@ -1946,7 +1847,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                       height={item.depth}
                       fill="transparent"
                     />
-                    {/* Contoured Seat */}
                     <path
                       d={`M ${-halfW + 4} ${-halfD + 10}
                           L ${halfW - 4} ${-halfD + 10}
@@ -1960,7 +1860,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                       stroke={isSelected ? '#2563eb' : '#0f172a'}
                       strokeWidth="1.5"
                     />
-                    {/* Backrest Rail */}
                     <rect
                       x={-halfW + 3}
                       y={-halfD + 2}
@@ -1974,7 +1873,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   </g>
                 )}
 
-                {/* Round Table Detail */}
                 {item.iconType === 'table_round' && (
                   <circle
                     cx="0"
@@ -1987,7 +1885,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   />
                 )}
 
-                {/* Nightstand Detail */}
                 {item.iconType === 'nightstand' && (
                   <g>
                     <line
@@ -2003,7 +1900,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   </g>
                 )}
 
-                {/* Label: only render on larger items without detailed central graphics */}
                 {(item.shape ? item.width >= 50 && item.depth >= 30 : item.width >= 110 && item.depth >= 60) &&
                   item.iconType !== 'chair_office' &&
                   item.iconType !== 'dining_chair' &&
@@ -2026,7 +1922,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
             );
           })}
 
-          {/* Custom Text Boxes */}
           {(state.textBoxes || []).map((item) => {
             const isSelected = selectedId === item.id || selectedIds.includes(item.id);
             const halfW = item.width / 2;
@@ -2058,7 +1953,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                 }}
                 className="cursor-move"
               >
-                {/* Background Box */}
                 <rect
                   x={-halfW}
                   y={-halfH}
@@ -2071,7 +1965,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   strokeDasharray={item.borderStyle === 'dashed' ? '5 3' : undefined}
                 />
 
-                {/* Multiline Text */}
                 <text
                   x={
                     item.textAlign === 'left'
@@ -2116,7 +2009,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
             );
           })}
 
-          {/* Selection Box, Endpoint Resize Handles & 360 Rotation for Selected Wall */}
           {selectedIds.length <= 1 && selectedWall && (() => {
             const midX = (selectedWall.start.x + selectedWall.end.x) / 2;
             const midY = (selectedWall.start.y + selectedWall.end.y) / 2;
@@ -2129,7 +2021,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
 
             return (
               <g key={`selected_wall_${selectedWall.id}`}>
-                {/* Wall Bounding Outline Accent & Center Rotation Stem */}
                 <g transform={`translate(${midX}, ${midY}) rotate(${angleDeg})`}>
                   <rect
                     x={-wallLength / 2 - 4}
@@ -2142,7 +2033,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                     strokeDasharray="6 3"
                     rx="3"
                   />
-                  {/* Floating length dimension pill badge */}
                   <g transform={`translate(0, ${-selectedWall.thickness / 2 - 16})`}>
                     <rect
                       x="-36"
@@ -2164,7 +2054,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                       {formatDimension(wallLength, state.unit)}
                     </text>
                   </g>
-                  {/* 360 Rotation Stem and Handle */}
                   <line
                     x1="0"
                     y1={-selectedWall.thickness / 2 - 4}
@@ -2189,7 +2078,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   />
                 </g>
 
-                {/* Start Endpoint Resize Handle */}
                 <g transform={`translate(${selectedWall.start.x}, ${selectedWall.start.y})`}>
                   <circle
                     r="8"
@@ -2206,7 +2094,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   <circle r="3" fill="#ffffff" style={{ pointerEvents: 'none' }} />
                 </g>
 
-                {/* End Endpoint Resize Handle */}
                 <g transform={`translate(${selectedWall.end.x}, ${selectedWall.end.y})`}>
                   <circle
                     r="8"
@@ -2226,7 +2113,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
             );
           })()}
 
-          {/* Selection Box, Edge Resizing & 360 Rotation for Selected Door */}
           {selectedIds.length <= 1 && selectedDoor && (
             <g
               transform={`translate(${selectedDoor.x}, ${selectedDoor.y}) rotate(${selectedDoor.rotation})`}
@@ -2242,7 +2128,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                 strokeDasharray="6 3"
                 rx="4"
               />
-              {/* Left Edge Resize Handle */}
               <rect
                 x={-selectedDoor.width / 2 - 9}
                 y="-12"
@@ -2259,7 +2144,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   setResizeTarget({ id: selectedDoor.id, type: 'door', handle: 'left' });
                 }}
               />
-              {/* Right Edge Resize Handle */}
               <rect
                 x={selectedDoor.width / 2 + 1}
                 y="-12"
@@ -2276,7 +2160,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   setResizeTarget({ id: selectedDoor.id, type: 'door', handle: 'right' });
                 }}
               />
-              {/* Width dimension badge */}
               <text
                 x="0"
                 y="-26"
@@ -2288,7 +2171,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
               >
                 {formatDimension(selectedDoor.width, state.unit)}
               </text>
-              {/* 360 Rotation Handle */}
               <line x1="0" y1="-16" x2="0" y2="-44" stroke="#2563eb" strokeWidth="1.8" />
               <circle
                 cx="0"
@@ -2307,7 +2189,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
             </g>
           )}
 
-          {/* Selection Box, Edge Resizing & 360 Rotation for Selected Window */}
           {selectedIds.length <= 1 && selectedWindow && (
             <g
               transform={`translate(${selectedWindow.x}, ${selectedWindow.y}) rotate(${selectedWindow.rotation})`}
@@ -2323,7 +2204,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                 strokeDasharray="6 3"
                 rx="4"
               />
-              {/* Left Edge Resize Handle */}
               <rect
                 x={-selectedWindow.width / 2 - 9}
                 y="-12"
@@ -2340,7 +2220,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   setResizeTarget({ id: selectedWindow.id, type: 'window', handle: 'left' });
                 }}
               />
-              {/* Right Edge Resize Handle */}
               <rect
                 x={selectedWindow.width / 2 + 1}
                 y="-12"
@@ -2357,7 +2236,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   setResizeTarget({ id: selectedWindow.id, type: 'window', handle: 'right' });
                 }}
               />
-              {/* Width dimension badge */}
               <text
                 x="0"
                 y={-selectedWindow.thickness / 2 - 14}
@@ -2369,7 +2247,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
               >
                 {formatDimension(selectedWindow.width, state.unit)}
               </text>
-              {/* 360 Rotation Handle */}
               <line
                 x1="0"
                 y1={-selectedWindow.thickness / 2 - 6}
@@ -2395,12 +2272,10 @@ export const FloorplanCanvas: React.FC<Props> = ({
             </g>
           )}
 
-          {/* Selection Box, Edge Resizing & Rotation Handle for Selected Furniture */}
           {selectedIds.length <= 1 && selectedFurniture && (
             <g
               transform={`translate(${selectedFurniture.x}, ${selectedFurniture.y}) rotate(${selectedFurniture.rotation})`}
             >
-              {/* Highlight Bounding Box */}
               <rect
                 x={-selectedFurniture.width / 2 - 6}
                 y={-selectedFurniture.depth / 2 - 6}
@@ -2412,7 +2287,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                 strokeDasharray="6 3"
               />
 
-              {/* Left Edge Resize Handle */}
               <rect
                 x={-selectedFurniture.width / 2 - 10}
                 y="-10"
@@ -2429,7 +2303,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   setResizeTarget({ id: selectedFurniture.id, type: 'furniture', handle: 'left' });
                 }}
               />
-              {/* Right Edge Resize Handle */}
               <rect
                 x={selectedFurniture.width / 2 + 2}
                 y="-10"
@@ -2446,7 +2319,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   setResizeTarget({ id: selectedFurniture.id, type: 'furniture', handle: 'right' });
                 }}
               />
-              {/* Bottom Edge Depth Resize Handle */}
               <rect
                 x="-10"
                 y={selectedFurniture.depth / 2 + 2}
@@ -2464,7 +2336,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                 }}
               />
 
-              {/* Dimension indicators on edges */}
               <text
                 x="0"
                 y={-selectedFurniture.depth / 2 - 12}
@@ -2489,7 +2360,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                 {formatDimension(selectedFurniture.depth, state.unit)}
               </text>
 
-              {/* Rotation Handle */}
               <line
                 x1="0"
                 y1={-selectedFurniture.depth / 2 - 6}
@@ -2515,7 +2385,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
             </g>
           )}
 
-          {/* Selection Box, 8-Point Edge & Corner Resizing & 360 Rotation for Selected Text Box */}
           {selectedIds.length <= 1 && selectedTextBox && (() => {
             const halfW = selectedTextBox.width / 2;
             const halfH = selectedTextBox.height / 2;
@@ -2523,7 +2392,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
               <g
                 transform={`translate(${selectedTextBox.x}, ${selectedTextBox.y}) rotate(${selectedTextBox.rotation})`}
               >
-                {/* Bounding dashed border */}
                 <rect
                   x={-halfW - 4}
                   y={-halfH - 4}
@@ -2536,8 +2404,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   rx={(selectedTextBox.borderRadius ?? 6) + 3}
                 />
 
-                {/* 4 Corner Resize Handles */}
-                {/* Top-Left (NW) */}
                 <g
                   className="cursor-nwse-resize"
                   onPointerDown={(e) => {
@@ -2559,7 +2425,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   />
                 </g>
 
-                {/* Top-Right (NE) */}
                 <g
                   className="cursor-nesw-resize"
                   onPointerDown={(e) => {
@@ -2581,7 +2446,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   />
                 </g>
 
-                {/* Bottom-Right (SE) */}
                 <g
                   className="cursor-nwse-resize"
                   onPointerDown={(e) => {
@@ -2603,7 +2467,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   />
                 </g>
 
-                {/* Bottom-Left (SW) */}
                 <g
                   className="cursor-nesw-resize"
                   onPointerDown={(e) => {
@@ -2625,8 +2488,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   />
                 </g>
 
-                {/* 4 Edge Midpoint Handles */}
-                {/* Left Edge Handle */}
                 <g
                   className="cursor-ew-resize"
                   onPointerDown={(e) => {
@@ -2648,7 +2509,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   />
                 </g>
 
-                {/* Right Edge Handle */}
                 <g
                   className="cursor-ew-resize"
                   onPointerDown={(e) => {
@@ -2670,7 +2530,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   />
                 </g>
 
-                {/* Top Edge Handle */}
                 <g
                   className="cursor-ns-resize"
                   onPointerDown={(e) => {
@@ -2692,7 +2551,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   />
                 </g>
 
-                {/* Bottom Edge Handle */}
                 <g
                   className="cursor-ns-resize"
                   onPointerDown={(e) => {
@@ -2714,7 +2572,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   />
                 </g>
 
-                {/* Dimension indicators on top */}
                 <text
                   x="0"
                   y={-halfH - 12}
@@ -2727,7 +2584,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   {formatDimension(selectedTextBox.width, state.unit)} × {formatDimension(selectedTextBox.height, state.unit)}
                 </text>
 
-                {/* 360 Rotation Handle */}
                 <line
                   x1="0"
                   y1={-halfH - 5}
@@ -2754,7 +2610,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
             );
           })()}
 
-          {/* Placed Persistent Measurements */}
           {state.measurements.map((m) => {
             const isSelected = selectedId === m.id || selectedIds.includes(m.id);
             const dist = distance(m.start, m.end);
@@ -2770,7 +2625,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                 }}
                 className="cursor-pointer"
               >
-                {/* Invisible wide hit area for easy clicking */}
                 <line
                   x1={m.start.x}
                   y1={m.start.y}
@@ -2779,7 +2633,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   stroke="transparent"
                   strokeWidth="20"
                 />
-                {/* Visible measurement line */}
                 <line
                   x1={m.start.x}
                   y1={m.start.y}
@@ -2789,7 +2642,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   strokeWidth={isSelected ? '3' : '2'}
                   strokeDasharray="6 3"
                 />
-                {/* End ticks / dots */}
                 <circle
                   cx={m.start.x}
                   cy={m.start.y}
@@ -2806,7 +2658,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   stroke="#ffffff"
                   strokeWidth="1.5"
                 />
-                {/* Dimension Badge */}
                 <g transform={`translate(${midX}, ${midY})`}>
                   <rect
                     x="-34"
@@ -2833,7 +2684,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
             );
           })}
 
-          {/* Measuring Tape Tool Preview */}
           {measureStart && measureEnd && (
             <g>
               <line
@@ -2875,7 +2725,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
             </g>
           )}
 
-          {/* Scale Calibration Tool Preview */}
           {calibStart && calibEnd && (
             <g>
               <line
@@ -2917,7 +2766,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
             </g>
           )}
 
-          {/* Interactive Selection Marquee Box */}
           {selectionBox && (
             <g className="selection-marquee" style={{ pointerEvents: 'none' }}>
               <rect
@@ -2935,7 +2783,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
         </g>
       </svg>
 
-      {/* Active Scale Calibration Instruction Banner */}
       {tool === 'calibrate' && !pendingCalibDistCm && (
         <div className="canvas-floating-banner">
           <span>
@@ -2955,7 +2802,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
         </div>
       )}
 
-      {/* Scale Calibration Input Dialog */}
       {pendingCalibDistCm !== null && (
         <div className="calib-popover-backdrop">
           <form className="calib-popover-card" onSubmit={handleApplyCalibration}>
@@ -2996,7 +2842,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
           </form>
         </div>
       )}
-      {/* Bottom Right Grid Cell Scale & Dimension HUD */}
       <div className="canvas-grid-hud">
         <div className="grid-hud-icon">
           <svg width="22" height="22" viewBox="0 0 22 22" fill="none">

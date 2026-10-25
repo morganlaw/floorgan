@@ -6,6 +6,7 @@ import {
   FurnitureCategory,
   PlacedFurniture,
   FloorplanState,
+  SelectedElementType,
 } from '../types';
 import { formatDimension } from '../utils/geometry';
 import { TableIcon } from './icons/TableIcon';
@@ -14,14 +15,20 @@ import { CustomObjectCreator } from './CustomObjectCreator';
 
 const CUSTOM_CATALOG_KEY = 'floorgan_custom_catalog_v1';
 
-interface Props {
+interface SidebarProps {
   state: FloorplanState;
   setState: React.Dispatch<React.SetStateAction<FloorplanState>>;
   setSelectedId: (id: string | null) => void;
-  setSelectedType: (type: any) => void;
+  setSelectedType: (type: SelectedElementType) => void;
 }
 
-export const Sidebar: React.FC<Props> = ({
+interface CategoryOption {
+  id: FurnitureCategory | 'all';
+  label: string;
+  icon: React.ReactNode;
+}
+
+export const Sidebar: React.FC<SidebarProps> = ({
   state,
   setState,
   setSelectedId,
@@ -30,7 +37,6 @@ export const Sidebar: React.FC<Props> = ({
   const [selectedCategory, setSelectedCategory] = useState<FurnitureCategory | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Custom objects persist for the browser session (sessionStorage)
   const [customItems, setCustomItems] = useState<FurnitureCatalogItem[]>(() => {
     try {
       const saved = sessionStorage.getItem(CUSTOM_CATALOG_KEY);
@@ -51,7 +57,7 @@ export const Sidebar: React.FC<Props> = ({
     }
   }, [customItems]);
 
-  const categories = [
+  const categories: CategoryOption[] = [
     { id: 'all', label: 'All Items', icon: null },
     { id: 'beds', label: 'Beds', icon: <Bed size={15} /> },
     { id: 'tables', label: 'Tables', icon: <TableIcon size={15} /> },
@@ -69,9 +75,8 @@ export const Sidebar: React.FC<Props> = ({
   });
 
   const handleAddFurniture = (catalogItem: FurnitureCatalogItem) => {
-    // Place at canvas center or offset based on existing items
     const newPlacedItem: PlacedFurniture = {
-      id: 'furn_' + Date.now(),
+      id: `furn_${Date.now()}`,
       catalogId: catalogItem.catalogId,
       name: catalogItem.name,
       category: catalogItem.category,
@@ -106,7 +111,7 @@ export const Sidebar: React.FC<Props> = ({
         ? prev.map((i) => (i.catalogId === item.catalogId ? item : i))
         : [...prev, item]
     );
-    // Also update existing placed items on the floorplan canvas if this custom item was edited
+
     setState((prev) => ({
       ...prev,
       furniture: prev.furniture.map((f) =>
@@ -123,6 +128,7 @@ export const Sidebar: React.FC<Props> = ({
           : f
       ),
     }));
+
     setCreatorOpen(false);
     setEditingItem(null);
     setSelectedCategory('custom');
@@ -141,7 +147,6 @@ export const Sidebar: React.FC<Props> = ({
         <span className="sidebar-badge">{filteredItems.length} items</span>
       </div>
 
-      {/* Search Input */}
       <div className="search-box">
         <Search size={16} className="search-icon" />
         <input
@@ -153,13 +158,12 @@ export const Sidebar: React.FC<Props> = ({
         />
       </div>
 
-      {/* Category Pills */}
       <div className="category-chips">
         {categories.map((cat) => (
           <button
             key={cat.id}
             className={`chip-btn ${selectedCategory === cat.id ? 'active' : ''}`}
-            onClick={() => setSelectedCategory(cat.id as any)}
+            onClick={() => setSelectedCategory(cat.id)}
           >
             {cat.icon}
             <span>{cat.label}</span>
@@ -170,10 +174,13 @@ export const Sidebar: React.FC<Props> = ({
         ))}
       </div>
 
-      {/* Item List */}
       <div className="catalog-grid">
         <div className="custom-actions-bar">
-          <button className="create-custom-btn w-full" onClick={() => openCreator()} title="Create custom object shape">
+          <button
+            className="create-custom-btn w-full"
+            onClick={() => openCreator()}
+            title="Create custom object shape"
+          >
             <Plus size={14} />
             <span>Create Custom Shape</span>
           </button>
@@ -194,7 +201,7 @@ export const Sidebar: React.FC<Props> = ({
               onClick={() => handleAddFurniture(item)}
               title={item.description || `Click to place ${item.name}`}
             >
-              <div className="catalog-card-preview" style={{ backgroundColor: item.color + '22' }}>
+              <div className="catalog-card-preview" style={{ backgroundColor: `${item.color}22` }}>
                 {item.shape ? (
                   <ShapeThumbnail
                     shape={item.shape}

@@ -1,40 +1,39 @@
 export type Unit = 'm' | 'ft';
 
 export interface Point {
-  x: number; // in centimeters
-  y: number; // in centimeters
+  x: number;
+  y: number;
 }
 
 export interface Wall {
   id: string;
   start: Point;
   end: Point;
-  thickness: number; // in centimeters (default: 15cm)
+  thickness: number;
 }
 
 export interface Door {
   id: string;
-  x: number; // center x in cm
-  y: number; // center y in cm
-  width: number; // width in cm (default: 80cm)
-  rotation: number; // in degrees
+  x: number;
+  y: number;
+  width: number;
+  rotation: number;
   swingDirection: 'left' | 'right';
   wallId?: string;
 }
 
 export interface WindowItem {
   id: string;
-  x: number; // center x in cm
-  y: number; // center y in cm
-  width: number; // width in cm (default: 100cm)
-  thickness: number; // thickness in cm (default: 15cm)
-  rotation: number; // in degrees
+  x: number;
+  y: number;
+  width: number;
+  thickness: number;
+  rotation: number;
   wallId?: string;
 }
 
 export type FurnitureCategory = 'beds' | 'tables' | 'seating' | 'custom';
 
-/** Basic parametric shapes plus 'polygon' for freeform shapes drawn in the advanced editor */
 export type CustomShapeKind =
   | 'rect'
   | 'rounded_rect'
@@ -48,10 +47,9 @@ export type CustomShapeKind =
   | 'octagon'
   | 'polygon';
 
-/** Optional geometry for custom-created objects */
 export interface CustomShapeData {
   shape?: CustomShapeKind;
-  /** Normalized vertices in [-0.5, 0.5] (scaled by width/depth). Used when shape === 'polygon'. */
+  /** Normalized vertices in [-0.5, 0.5] */
   points?: Point[];
 }
 
@@ -59,8 +57,8 @@ export interface FurnitureCatalogItem extends CustomShapeData {
   catalogId: string;
   name: string;
   category: FurnitureCategory;
-  width: number; // in cm
-  depth: number; // in cm
+  width: number;
+  depth: number;
   color: string;
   iconType: string;
   description: string;
@@ -71,11 +69,11 @@ export interface PlacedFurniture extends CustomShapeData {
   catalogId: string;
   name: string;
   category: FurnitureCategory;
-  x: number; // center x in cm
-  y: number; // center y in cm
-  width: number; // in cm
-  depth: number; // in cm
-  rotation: number; // in degrees
+  x: number;
+  y: number;
+  width: number;
+  depth: number;
+  rotation: number;
   color: string;
   iconType: string;
 }
@@ -90,24 +88,24 @@ export interface RoomLabel {
   id: string;
   name: string;
   dimensionsText?: string;
-  x: number; // center x in cm
-  y: number; // center y in cm
+  x: number;
+  y: number;
 }
 
 export interface TextBoxItem {
   id: string;
   text: string;
-  x: number; // center x in cm
-  y: number; // center y in cm
-  width: number; // width in cm
-  height: number; // height in cm
-  fontSize: number; // font size
-  color: string; // text color
-  backgroundColor: string; // background fill ('transparent' or hex)
-  borderColor: string; // border outline
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  fontSize: number;
+  color: string;
+  backgroundColor: string;
+  borderColor: string;
   borderStyle: 'solid' | 'dashed' | 'none';
-  borderRadius: number; // corner radius in px
-  rotation: number; // in degrees
+  borderRadius: number;
+  rotation: number;
   textAlign: 'left' | 'center' | 'right';
   bold?: boolean;
   italic?: boolean;
@@ -115,11 +113,11 @@ export interface TextBoxItem {
 
 export interface BackgroundLayer {
   dataUrl: string;
-  x: number; // top-left x in cm
-  y: number; // top-left y in cm
-  width: number; // width in cm
-  height: number; // height in cm
-  opacity: number; // 0.0 to 1.0
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  opacity: number;
   visible: boolean;
 }
 
@@ -144,7 +142,7 @@ export interface FloorplanState {
   textBoxes?: TextBoxItem[];
   unit: Unit;
   gridSnap: boolean;
-  gridSize: number; // in cm (e.g. 20cm or 50cm)
+  gridSize: number;
   background?: BackgroundLayer | null;
 }
 

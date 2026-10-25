@@ -1319,7 +1319,7 @@ kbd {
 
 
 
-/* ---------- Shared helpers ---------- */
+/* Shared helpers */
 .divider {
   height: 1px;
   background-color: #e2e8f0;
@@ -1342,7 +1342,7 @@ kbd {
   cursor: nesw-resize;
 }
 
-/* ---------- Custom catalog items ---------- */
+/* Custom catalog items */
 .chip-count {
   font-size: 9px;
   font-weight: 700;
@@ -1443,7 +1443,7 @@ kbd {
   color: #dc2626;
 }
 
-/* ---------- Custom Object Creator ---------- */
+/* Custom Object Creator */
 .creator-modal-card {
   width: 920px;
   max-width: 96vw;

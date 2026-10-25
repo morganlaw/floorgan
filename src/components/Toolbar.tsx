@@ -16,10 +16,10 @@ import {
   HelpCircle,
   Upload,
 } from 'lucide-react';
-import { FloorplanState, ToolMode, Unit } from '../types';
+import { FloorplanState, SelectedElementType, ToolMode, Unit } from '../types';
 import { TEMPLATES } from '../templates';
 
-interface Props {
+interface ToolbarProps {
   tool: ToolMode;
   setTool: (tool: ToolMode) => void;
   state: FloorplanState;
@@ -28,7 +28,7 @@ interface Props {
   setZoom: React.Dispatch<React.SetStateAction<number>>;
   setPan: React.Dispatch<React.SetStateAction<{ x: number; y: number }>>;
   setSelectedId: (id: string | null) => void;
-  setSelectedType: (type: any) => void;
+  setSelectedType: (type: SelectedElementType) => void;
   onOpenImportModal: () => void;
   onOpenShortcuts?: () => void;
   undo: () => void;
@@ -37,7 +37,7 @@ interface Props {
   canRedo: boolean;
 }
 
-export const Toolbar: React.FC<Props> = ({
+export const Toolbar: React.FC<ToolbarProps> = ({
   tool,
   setTool,
   state,
@@ -106,13 +106,11 @@ export const Toolbar: React.FC<Props> = ({
 
   return (
     <header className="toolbar">
-      {/* Brand */}
       <div className="brand">
         <span className="brand-logo">📐</span>
         <h1 className="brand-title">Floorgan</h1>
       </div>
 
-      {/* Primary Feature: Import Floorplan */}
       <div className="import-btn-container">
         <button
           className="tool-btn import-highlight-btn"
@@ -141,7 +139,6 @@ export const Toolbar: React.FC<Props> = ({
 
       <div className="divider-vertical" />
 
-      {/* Primary Tool Selector */}
       <div className="tool-group">
         <button
           className={`tool-btn ${tool === 'select' ? 'active' : ''}`}
@@ -209,7 +206,6 @@ export const Toolbar: React.FC<Props> = ({
 
       <div className="divider-vertical" />
 
-      {/* Undo & Redo History Controls */}
       <div className="tool-group">
         <button
           className="tool-btn"
@@ -232,7 +228,6 @@ export const Toolbar: React.FC<Props> = ({
         </button>
       </div>
 
-      {/* Grid Snap & Unit Toggle */}
       <div className="tool-group">
         <button
           className={`tool-btn ${state.gridSnap ? 'active' : ''}`}
@@ -261,7 +256,6 @@ export const Toolbar: React.FC<Props> = ({
 
       <div className="divider-vertical" />
 
-      {/* View Zoom Controls */}
       <div className="tool-group">
         <button
           className="tool-btn-icon"
@@ -289,7 +283,6 @@ export const Toolbar: React.FC<Props> = ({
         </button>
       </div>
 
-      {/* Right Group: Compact Template Loader & Shortcuts */}
       <div className="tool-group-right">
         <select
           className="select-dropdown select-dropdown-sm"

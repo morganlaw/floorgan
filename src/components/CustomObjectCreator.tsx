@@ -14,7 +14,6 @@ import { ShapeBody, ShapeThumbnail } from './ShapeBody';
 interface Props {
   isOpen: boolean;
   unit: Unit;
-  /** When set, the creator edits this existing custom catalog item */
   editingItem: FurnitureCatalogItem | null;
   onClose: () => void;
   onSave: (item: FurnitureCatalogItem, placeNow: boolean) => void;
@@ -40,7 +39,7 @@ const WORKSPACES = [
   { w: 800, h: 600 },
 ];
 
-const MIN_SIZE = 5; // cm
+const MIN_SIZE = 5;
 
 const cmToUnit = (cm: number, unit: Unit) => (unit === 'm' ? cm / 100 : cm / 30.48);
 const unitToCm = (v: number, unit: Unit) => (unit === 'm' ? v * 100 : v * 30.48);
@@ -65,7 +64,6 @@ const polygonArea = (pts: Point[]) => {
   return Math.abs(a) / 2;
 };
 
-/** Unit-aware numeric input that allows smooth typing and commits valid values in cm. */
 const DimInput: React.FC<{
   label: string;
   valueCm: number;
@@ -151,7 +149,6 @@ export const CustomObjectCreator: React.FC<Props> = ({
   const [name, setName] = useState('');
   const [color, setColor] = useState('#0f766e');
 
-  // Basic mode
   const [shape, setShape] = useState<BasicShapeKind>('rect');
   const [width, setWidth] = useState(100);
   const [depth, setDepth] = useState(60);
@@ -160,7 +157,6 @@ export const CustomObjectCreator: React.FC<Props> = ({
   const [frozenSpan, setFrozenSpan] = useState<number | null>(null);
   const previewRef = useRef<SVGSVGElement | null>(null);
 
-  // Advanced mode
   const [verts, setVerts] = useState<Point[]>([]);
   const [closed, setClosed] = useState(false);
   const [history, setHistory] = useState<{ verts: Point[]; closed: boolean }[]>([]);
@@ -172,11 +168,10 @@ export const CustomObjectCreator: React.FC<Props> = ({
   const editorRef = useRef<SVGSVGElement | null>(null);
 
   const ws = WORKSPACES[wsIdx];
-  const snapStep = unit === 'm' ? 5 : 7.62; // 5cm or 3"
-  const minorGrid = unit === 'm' ? 10 : 15.24; // 10cm or 6"
-  const majorGrid = unit === 'm' ? 50 : 30.48; // 50cm or 1'
+  const snapStep = unit === 'm' ? 5 : 7.62;
+  const minorGrid = unit === 'm' ? 10 : 15.24;
+  const majorGrid = unit === 'm' ? 50 : 30.48;
 
-  // Reset form whenever the creator opens
   useEffect(() => {
     if (!isOpen) return;
     const it = editingItem;
@@ -211,7 +206,6 @@ export const CustomObjectCreator: React.FC<Props> = ({
     }
   }, [isOpen, editingItem]);
 
-  // ---------- Advanced editor helpers ----------
   const clampToWs = (p: Point): Point => ({
     x: Math.min(Math.max(p.x, 0), ws.w),
     y: Math.min(Math.max(p.y, 0), ws.h),
@@ -224,7 +218,6 @@ export const CustomObjectCreator: React.FC<Props> = ({
         : { x: Math.round(p.x * 2) / 2, y: Math.round(p.y * 2) / 2 }
     );
 
-  /** Snap + optional Shift-constrained 45° angle relative to an anchor vertex */
   const resolvePt = (raw: Point, anchor: Point | null, shift: boolean): Point => {
     const p = snapPt(raw);
     if (shift && anchor) return clampToWs(snapAngle(anchor, p, snapOn ? snapStep : undefined, snapOn));
@@ -287,7 +280,6 @@ export const CustomObjectCreator: React.FC<Props> = ({
               { x: -0.5, y: 0.5 },
             ];
     }
-    // Choose a workspace large enough to fit the template at its current basic dimensions
     let idx = WORKSPACES.findIndex((w) => w.w >= width * 1.15 && w.h >= depth * 1.15);
     if (idx === -1) idx = WORKSPACES.length - 1;
     const space = WORKSPACES[Math.max(idx, wsIdx)];
@@ -314,7 +306,6 @@ export const CustomObjectCreator: React.FC<Props> = ({
     const raw = toSvgPoint(editorRef.current, e.clientX, e.clientY);
     const anchor = verts.length ? verts[verts.length - 1] : null;
     const p = resolvePt(raw, anchor, e.shiftKey);
-    // Ignore duplicate clicks on the same spot
     if (anchor && distance(anchor, p) < 0.5) return;
     pushHistory();
     setVerts((v) => [...v, p]);
@@ -369,7 +360,6 @@ export const CustomObjectCreator: React.FC<Props> = ({
     editorRef.current?.setPointerCapture(e.pointerId);
   };
 
-  // Isolate keyboard input from global canvas shortcuts while the creator is open
   useEffect(() => {
     if (!isOpen) return;
     const handler = (e: KeyboardEvent) => {
@@ -380,7 +370,6 @@ export const CustomObjectCreator: React.FC<Props> = ({
       if (typing) return;
 
       if (e.key === 'Escape') {
-        // Don't discard an in-progress drawing; use Cancel for that
         if (!(mode === 'advanced' && verts.length > 0)) onClose();
         return;
       }
@@ -400,7 +389,6 @@ export const CustomObjectCreator: React.FC<Props> = ({
     return () => window.removeEventListener('keydown', handler, true);
   });
 
-  // ---------- Basic preview resizing ----------
   const autoSpan = Math.max(150, Math.ceil((Math.max(width, depth) * 1.4) / 50) * 50);
   const span = frozenSpan ?? autoSpan;
 
@@ -446,7 +434,6 @@ export const CustomObjectCreator: React.FC<Props> = ({
     setDepth(cm);
   };
 
-  // ---------- Derived info / save ----------
   const polyInfo = useMemo(() => {
     if (verts.length < 2) return null;
     const n = normalizePolygon(verts);
@@ -474,7 +461,6 @@ export const CustomObjectCreator: React.FC<Props> = ({
       y: cy + (p.y - cy) * sy,
     }));
 
-    // Auto expand workspace if necessary to prevent vertices going out of bounds
     const requiredW = Math.max(...newVerts.map((p) => Math.abs(p.x - ws.w / 2))) * 2 * 1.15;
     const requiredH = Math.max(...newVerts.map((p) => Math.abs(p.y - ws.h / 2))) * 2 * 1.15;
     const idx = WORKSPACES.findIndex((w) => w.w >= requiredW && w.h >= requiredH);
@@ -550,10 +536,9 @@ export const CustomObjectCreator: React.FC<Props> = ({
 
   if (!isOpen) return null;
 
-  // Editor sizing relative to workspace
-  const hr = ws.w / 110; // handle radius
-  const sw = ws.w / 400; // stroke width
-  const fs = ws.w / 50; // font size
+  const handleRadius = ws.w / 110;
+  const strokeWidth = ws.w / 400;
+  const fontSize = ws.w / 50;
   const n = verts.length;
   const segments: [number, number][] = [];
   for (let i = 0; i < n - 1; i++) segments.push([i, i + 1]);
@@ -582,7 +567,6 @@ export const CustomObjectCreator: React.FC<Props> = ({
         </div>
 
         <div className="creator-body">
-          {/* Left: settings */}
           <div className="creator-settings">
             <div className="field-group">
               <label className="field-label">Name</label>
@@ -752,7 +736,6 @@ export const CustomObjectCreator: React.FC<Props> = ({
             )}
           </div>
 
-          {/* Right: preview / drawing panel */}
           <div className="creator-stage">
             <div className="creator-stage-header">
               <span>{mode === 'basic' ? 'Preview' : 'Shape Editor'}</span>
@@ -830,7 +813,6 @@ export const CustomObjectCreator: React.FC<Props> = ({
                 >
                   {formatDimension(depth, unit)}
                 </text>
-                {/* Resize handles */}
                 <rect
                   className="cursor-ew-resize"
                   x={width / 2 - span / 120}
@@ -884,7 +866,7 @@ export const CustomObjectCreator: React.FC<Props> = ({
                       d={`M ${minorGrid} 0 L 0 0 0 ${minorGrid}`}
                       fill="none"
                       stroke="#eef2f7"
-                      strokeWidth={sw * 0.8}
+                      strokeWidth={strokeWidth * 0.8}
                     />
                   </pattern>
                   <pattern id="creatorMajor" width={majorGrid} height={majorGrid} patternUnits="userSpaceOnUse">
@@ -893,21 +875,20 @@ export const CustomObjectCreator: React.FC<Props> = ({
                       d={`M ${majorGrid} 0 L 0 0 0 ${majorGrid}`}
                       fill="none"
                       stroke="#cbd5e1"
-                      strokeWidth={sw}
+                      strokeWidth={strokeWidth}
                     />
                   </pattern>
                 </defs>
                 <rect width={ws.w} height={ws.h} fill="#ffffff" />
                 <rect width={ws.w} height={ws.h} fill="url(#creatorMajor)" />
 
-                {/* Shape body */}
                 {closed && n >= 3 ? (
                   <polygon
                     points={verts.map((p) => `${p.x},${p.y}`).join(' ')}
                     fill={color}
                     fillOpacity={0.6}
                     stroke="#0f172a"
-                    strokeWidth={sw * 1.5}
+                    strokeWidth={strokeWidth * 1.5}
                     strokeLinejoin="round"
                   />
                 ) : (
@@ -916,14 +897,13 @@ export const CustomObjectCreator: React.FC<Props> = ({
                       points={verts.map((p) => `${p.x},${p.y}`).join(' ')}
                       fill="none"
                       stroke={color}
-                      strokeWidth={sw * 2.5}
+                      strokeWidth={strokeWidth * 2.5}
                       strokeLinejoin="round"
                       strokeLinecap="round"
                     />
                   )
                 )}
 
-                {/* Rubber-band preview line */}
                 {!closed && n > 0 && hover && dragIdx === null && (
                   <line
                     x1={verts[n - 1].x}
@@ -931,16 +911,15 @@ export const CustomObjectCreator: React.FC<Props> = ({
                     x2={hover.x}
                     y2={hover.y}
                     stroke="#2563eb"
-                    strokeWidth={sw * 1.5}
-                    strokeDasharray={`${sw * 6} ${sw * 4}`}
+                    strokeWidth={strokeWidth * 1.5}
+                    strokeDasharray={`${strokeWidth * 6} ${strokeWidth * 4}`}
                     pointerEvents="none"
                   />
                 )}
                 {!closed && hover && dragIdx === null && (
-                  <circle cx={hover.x} cy={hover.y} r={hr * 0.5} fill="#2563eb" fillOpacity={0.5} pointerEvents="none" />
+                  <circle cx={hover.x} cy={hover.y} r={handleRadius * 0.5} fill="#2563eb" fillOpacity={0.5} pointerEvents="none" />
                 )}
 
-                {/* Edge length labels */}
                 {segments.map(([a, b]) => {
                   const len = distance(verts[a], verts[b]);
                   if (len < ws.w / 14) return null;
@@ -948,14 +927,14 @@ export const CustomObjectCreator: React.FC<Props> = ({
                     <text
                       key={`len-${a}-${b}`}
                       x={(verts[a].x + verts[b].x) / 2}
-                      y={(verts[a].y + verts[b].y) / 2 - hr * 1.6}
+                      y={(verts[a].y + verts[b].y) / 2 - handleRadius * 1.6}
                       textAnchor="middle"
-                      fontSize={fs}
+                      fontSize={fontSize}
                       fontWeight="700"
                       fill="#334155"
                       fontFamily="monospace"
                       stroke="#ffffff"
-                      strokeWidth={fs / 4}
+                      strokeWidth={fontSize / 4}
                       paintOrder="stroke"
                       pointerEvents="none"
                     >
@@ -964,10 +943,9 @@ export const CustomObjectCreator: React.FC<Props> = ({
                   );
                 })}
 
-                {/* Midpoint insert handles */}
                 {dragIdx === null &&
                   segments.map(([a, b]) => {
-                    if (distance(verts[a], verts[b]) < hr * 5) return null;
+                    if (distance(verts[a], verts[b]) < handleRadius * 5) return null;
                     const mx = (verts[a].x + verts[b].x) / 2;
                     const my = (verts[a].y + verts[b].y) / 2;
                     return (
@@ -976,17 +954,16 @@ export const CustomObjectCreator: React.FC<Props> = ({
                         className="creator-mid-handle"
                         onPointerDown={(e) => startMidpointInsert(e, a)}
                       >
-                        <circle cx={mx} cy={my} r={hr * 0.75} fill="#ffffff" stroke="#2563eb" strokeWidth={sw} />
+                        <circle cx={mx} cy={my} r={handleRadius * 0.75} fill="#ffffff" stroke="#2563eb" strokeWidth={strokeWidth} />
                         <path
-                          d={`M ${mx - hr * 0.4} ${my} H ${mx + hr * 0.4} M ${mx} ${my - hr * 0.4} V ${my + hr * 0.4}`}
+                          d={`M ${mx - handleRadius * 0.4} ${my} H ${mx + handleRadius * 0.4} M ${mx} ${my - handleRadius * 0.4} V ${my + handleRadius * 0.4}`}
                           stroke="#2563eb"
-                          strokeWidth={sw}
+                          strokeWidth={strokeWidth}
                         />
                       </g>
                     );
                   })}
 
-                {/* Vertices */}
                 {verts.map((p, i) => {
                   const isFirstClosable = !closed && i === 0 && n >= 3;
                   return (
@@ -994,10 +971,10 @@ export const CustomObjectCreator: React.FC<Props> = ({
                       key={`v-${i}`}
                       cx={p.x}
                       cy={p.y}
-                      r={isFirstClosable ? hr * 1.35 : hr}
+                      r={isFirstClosable ? handleRadius * 1.35 : handleRadius}
                       fill={selIdx === i ? '#2563eb' : isFirstClosable ? '#dcfce7' : '#ffffff'}
                       stroke={isFirstClosable ? '#16a34a' : '#2563eb'}
-                      strokeWidth={sw * 1.5}
+                      strokeWidth={strokeWidth * 1.5}
                       className="creator-vertex"
                       onPointerDown={(e) => startVertexDrag(e, i)}
                       onDoubleClick={(e) => {

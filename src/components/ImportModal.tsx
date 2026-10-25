@@ -27,25 +27,28 @@ import {
 } from '../utils/floorplanParser';
 import { segmentFloorplanMlBrowser } from '../utils/mlSegmenter';
 
-interface Props {
+interface ImportModalProps {
   isOpen: boolean;
   onClose: () => void;
   state: FloorplanState;
   onImport: (newState: FloorplanState) => void;
 }
 
-export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport }) => {
+export const ImportModal: React.FC<ImportModalProps> = ({
+  isOpen,
+  onClose,
+  state,
+  onImport,
+}) => {
   const [activeTab, setActiveTab] = useState<'upload' | 'url'>('upload');
   const [imageDataUrl, setImageDataUrl] = useState<string | null>(null);
   const [loadedImageEl, setLoadedImageEl] = useState<HTMLImageElement | null>(null);
 
-  // URL state
   const [urlInput, setUrlInput] = useState('');
   const [isLoadingUrl, setIsLoadingUrl] = useState(false);
   const [urlError, setUrlError] = useState<string | null>(null);
   const [urlCandidates, setUrlCandidates] = useState<{ url: string; label: string }[]>([]);
 
-  // Deterministic CV + OCR Parser options
   const options = DEFAULT_PARSE_OPTIONS;
   const [ocrCandidates, setOcrCandidates] = useState<RawDimensionCandidate[]>([]);
   const [roomCandidates, setRoomCandidates] = useState<RawRoomNameCandidate[]>([]);
@@ -62,9 +65,18 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport 
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Listen for clipboard image paste (Ctrl+V / Cmd+V) when modal is open
+  const handleFileSelect = (file: File) => {
+    setUrlError(null);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      setImageDataUrl(e.target?.result as string);
+    };
+    reader.readAsDataURL(file);
+  };
+
   useEffect(() => {
     if (!isOpen) return;
+
     const handlePaste = (e: ClipboardEvent) => {
       const items = e.clipboardData?.items;
       if (!items) return;
@@ -78,11 +90,11 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport 
         }
       }
     };
+
     window.addEventListener('paste', handlePaste);
     return () => window.removeEventListener('paste', handlePaste);
   }, [isOpen]);
 
-  // Decode HTMLImageElement whenever imageDataUrl changes
   useEffect(() => {
     if (!imageDataUrl) {
       setLoadedImageEl(null);
@@ -99,7 +111,6 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport 
     img.src = imageDataUrl;
   }, [imageDataUrl]);
 
-  // Run deterministic client-side OCR to detect printed room names & dimensions
   useEffect(() => {
     if (!loadedImageEl) return;
     let cancelled = false;
@@ -128,7 +139,6 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport 
     };
   }, [loadedImageEl, options.invert]);
 
-  // Run ML Segmentation when parserEngine === 'ml' and image changes
   useEffect(() => {
     if (!loadedImageEl || parserEngine !== 'ml') {
       setMlMasks(null);
@@ -161,7 +171,7 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport 
         }
       })
       .catch((err) => {
-        console.warn('ML segmentation fallback to Classic CV:', err);
+        console.warn('Segmentation fallback to Otsu:', err);
         if (!cancelled) {
           setMlMasks(null);
         }
@@ -175,7 +185,6 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport 
     };
   }, [loadedImageEl, parserEngine]);
 
-  // Re-run deterministic CV pipeline whenever image, options, ML masks, or OCR candidates change
   useEffect(() => {
     if (!loadedImageEl) return;
     const res = parseFloorplanImage(
@@ -191,15 +200,6 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport 
   }, [loadedImageEl, options, ocrCandidates, useOcrScale, roomCandidates, ocrTextBoxes, parserEngine, mlMasks]);
 
   if (!isOpen) return null;
-
-  const handleFileSelect = (file: File) => {
-    setUrlError(null);
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      setImageDataUrl(e.target?.result as string);
-    };
-    reader.readAsDataURL(file);
-  };
 
   const handleFetchUrl = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -219,8 +219,8 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport 
         const dataUrl = await fetchImageUrlAsDataUrl(result.candidates[0].url);
         setImageDataUrl(dataUrl);
       }
-    } catch (err: any) {
-      setUrlError(err.message || 'Failed to fetch floorplan from URL.');
+    } catch (err: unknown) {
+      setUrlError(err instanceof Error ? err.message : 'Failed to fetch floorplan from URL.');
     } finally {
       setIsLoadingUrl(false);
     }
@@ -232,8 +232,8 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport 
     try {
       const dataUrl = await fetchImageUrlAsDataUrl(candidateUrl);
       setImageDataUrl(dataUrl);
-    } catch (err: any) {
-      setUrlError(err.message || 'Could not load selected image from page.');
+    } catch (err: unknown) {
+      setUrlError(err instanceof Error ? err.message : 'Could not load selected image from page.');
     } finally {
       setIsLoadingUrl(false);
     }
@@ -281,7 +281,6 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport 
         className="modal-card import-modal-card"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
         <div className="modal-header">
           <div>
             <h3 className="modal-title">Generate Floorplan from Image</h3>
@@ -294,11 +293,8 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport 
           </button>
         </div>
 
-        {/* Body */}
         <div className="import-modal-body">
-          {/* Left Column: Source Selection & Vectorization Controls */}
           <div className="import-controls-col">
-            {/* Source Tabs */}
             <div className="import-tabs">
               <button
                 className={`import-tab ${activeTab === 'upload' ? 'active' : ''}`}
@@ -316,7 +312,6 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport 
               </button>
             </div>
 
-            {/* Tab Content: Upload */}
             {activeTab === 'upload' && (
               <div className="import-source-box">
                 <div
@@ -356,7 +351,6 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport 
               </div>
             )}
 
-            {/* Tab Content: Website Link */}
             {activeTab === 'url' && (
               <div className="import-source-box">
                 <form onSubmit={handleFetchUrl} className="url-form">
@@ -407,7 +401,6 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport 
               </div>
             )}
 
-            {/* Image Status & Primary Settings */}
             {imageDataUrl && (
               <div className="import-config-card">
                 <div className="field-group mb-2">
@@ -416,7 +409,7 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport 
                     {isRunningMl && (
                       <span className="text-xs text-blue-600 flex items-center gap-1">
                         <Loader2 size={12} className="spin" />
-                        Running AI model...
+                        Segmenting floorplan...
                       </span>
                     )}
                   </div>
@@ -426,7 +419,7 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport 
                       className={`import-tab ${parserEngine === 'ml' ? 'active' : ''}`}
                       onClick={() => setParserEngine('ml')}
                     >
-                      <span>AI Model (ConvNeXt-UNet)</span>
+                      <span>Neural Model (ConvNeXt-UNet)</span>
                     </button>
                     <button
                       type="button"
@@ -491,7 +484,6 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport 
             )}
           </div>
 
-          {/* Right Column: Interactive Live Vector Preview */}
           <div className="import-preview-col">
             <div className="preview-toolbar">
               <div className="segmented-control">
@@ -536,7 +528,6 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport 
                   } ${parseResult.boundsCm.width + 80} ${parseResult.boundsCm.height + 80}`}
                   preserveAspectRatio="xMidYMid meet"
                 >
-                  {/* Base raster image or morphological mask */}
                   <image
                     href={
                       previewMode === 'mask' ? parseResult.maskPreviewDataUrl : imageDataUrl
@@ -549,7 +540,6 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport 
                     preserveAspectRatio="none"
                   />
 
-                  {/* Extracted Vector Walls */}
                   {parseResult.walls.map((w) => (
                     <g key={w.id}>
                       <line
@@ -567,7 +557,6 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport 
                     </g>
                   ))}
 
-                  {/* Extracted Doors */}
                   {parseResult.doors.map((d) => (
                     <g
                       key={d.id}
@@ -585,7 +574,6 @@ export const ImportModal: React.FC<Props> = ({ isOpen, onClose, state, onImport 
                     </g>
                   ))}
 
-                  {/* Extracted Windows */}
                   {parseResult.windows.map((win) => (
                     <g
                       key={win.id}

@@ -9,7 +9,7 @@ jobs:
   sync-to-website:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout MapGAN
+      - name: Checkout Floorgan
         uses: actions/checkout@v4
 
       - name: Setup Node.js

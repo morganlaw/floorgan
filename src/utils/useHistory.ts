@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { FloorplanState } from '../types';
 
 interface HistoryState {
@@ -14,18 +14,14 @@ export function useFloorplanHistory(initialState: FloorplanState, maxDepth = 50)
     future: [],
   });
 
-  // Snapshot taken at the beginning of an interactive continuous drag/resize/rotate
   const interactionSnapshotRef = useRef<FloorplanState | null>(null);
 
-  // Set state with undo/redo history tracking
   const setState: React.Dispatch<React.SetStateAction<FloorplanState>> = useCallback(
     (action) => {
       setHistory((prev) => {
         const next = typeof action === 'function' ? action(prev.present) : action;
         if (next === prev.present) return prev;
 
-        // If continuous interaction is active (e.g. dragging across canvas),
-        // update present without generating undo steps for every pixel moved.
         if (interactionSnapshotRef.current !== null) {
           return {
             ...prev,
@@ -33,7 +29,6 @@ export function useFloorplanHistory(initialState: FloorplanState, maxDepth = 50)
           };
         }
 
-        // Discrete change: push current state to past, clear future
         return {
           past: [...prev.past.slice(-(maxDepth - 1)), prev.present],
           present: next,
@@ -44,7 +39,6 @@ export function useFloorplanHistory(initialState: FloorplanState, maxDepth = 50)
     [maxDepth]
   );
 
-  // Start continuous interaction (drag, resize, rotate)
   const startInteraction = useCallback(() => {
     setHistory((prev) => {
       if (interactionSnapshotRef.current === null) {
@@ -54,17 +48,13 @@ export function useFloorplanHistory(initialState: FloorplanState, maxDepth = 50)
     });
   }, []);
 
-  // End continuous interaction: if state actually changed, push pre-interaction snapshot to past
   const endInteraction = useCallback(() => {
     const initial = interactionSnapshotRef.current;
     interactionSnapshotRef.current = null;
     if (!initial) return;
 
     setHistory((prev) => {
-      // Compare if any visual geometry actually changed
-      const initialJson = JSON.stringify(initial);
-      const presentJson = JSON.stringify(prev.present);
-      if (initialJson === presentJson) {
+      if (JSON.stringify(initial) === JSON.stringify(prev.present)) {
         return prev;
       }
 

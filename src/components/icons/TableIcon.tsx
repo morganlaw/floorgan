@@ -1,7 +1,12 @@
 import React from 'react';
 
-/** Lucide-style furniture table icon (tabletop with legs), replaces the spreadsheet-looking `Table` glyph. */
-export const TableIcon: React.FC<{ size?: number; strokeWidth?: number; className?: string }> = ({
+interface TableIconProps {
+  size?: number;
+  strokeWidth?: number;
+  className?: string;
+}
+
+export const TableIcon: React.FC<TableIconProps> = ({
   size = 24,
   strokeWidth = 2,
   className,
@@ -18,12 +23,9 @@ export const TableIcon: React.FC<{ size?: number; strokeWidth?: number; classNam
     strokeLinejoin="round"
     className={className}
   >
-    {/* Tabletop */}
     <rect x="2" y="6" width="20" height="3" rx="1" />
-    {/* Legs */}
     <path d="M5 9v10" />
     <path d="M19 9v10" />
-    {/* Apron / stretcher */}
     <path d="M5 13h14" />
   </svg>
 );

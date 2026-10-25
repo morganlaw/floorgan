@@ -9,19 +9,15 @@ export const TEMPLATES: Record<string, { name: string; state: FloorplanState }> 
       gridSize: 20,
       measurements: [],
       walls: [
-        // Exterior perimeter
         { id: 'w1', start: { x: 100, y: 100 }, end: { x: 800, y: 100 }, thickness: 20 },
         { id: 'w2', start: { x: 800, y: 100 }, end: { x: 800, y: 700 }, thickness: 20 },
         { id: 'w3', start: { x: 800, y: 700 }, end: { x: 100, y: 700 }, thickness: 20 },
         { id: 'w4', start: { x: 100, y: 700 }, end: { x: 100, y: 100 }, thickness: 20 },
-        // Partition wall
         { id: 'w5', start: { x: 100, y: 460 }, end: { x: 340, y: 460 }, thickness: 12 },
         { id: 'w6', start: { x: 340, y: 460 }, end: { x: 340, y: 700 }, thickness: 12 },
       ],
       doors: [
-        // Main entrance
         { id: 'd1', x: 200, y: 100, width: 90, rotation: 0, swingDirection: 'left' },
-        // Partition door
         { id: 'd2', x: 340, y: 560, width: 75, rotation: 90, swingDirection: 'right' },
       ],
       windows: [
@@ -29,7 +25,6 @@ export const TEMPLATES: Record<string, { name: string; state: FloorplanState }> 
         { id: 'win2', x: 800, y: 400, width: 160, thickness: 20, rotation: 90 },
       ],
       furniture: [
-        // Bedroom Zone
         {
           id: 'f1',
           catalogId: 'bed_queen',
@@ -56,7 +51,6 @@ export const TEMPLATES: Record<string, { name: string; state: FloorplanState }> 
           color: '#92400e',
           iconType: 'nightstand',
         },
-        // Living Zone
         {
           id: 'f3',
           catalogId: 'sofa_3seat',
@@ -83,7 +77,6 @@ export const TEMPLATES: Record<string, { name: string; state: FloorplanState }> 
           color: '#b45309',
           iconType: 'table_rect',
         },
-        // Dining Table
         {
           id: 'f5',
           catalogId: 'dining_table_4',
@@ -97,7 +90,6 @@ export const TEMPLATES: Record<string, { name: string; state: FloorplanState }> 
           color: '#854d0e',
           iconType: 'dining_set',
         },
-        // Desk & Office Chair
         {
           id: 'f6',
           catalogId: 'office_desk',
@@ -135,14 +127,11 @@ export const TEMPLATES: Record<string, { name: string; state: FloorplanState }> 
       gridSize: 20,
       measurements: [],
       walls: [
-        // Exterior perimeter
         { id: 'w1', start: { x: 80, y: 80 }, end: { x: 980, y: 80 }, thickness: 20 },
         { id: 'w2', start: { x: 980, y: 80 }, end: { x: 980, y: 780 }, thickness: 20 },
         { id: 'w3', start: { x: 980, y: 780 }, end: { x: 80, y: 780 }, thickness: 20 },
         { id: 'w4', start: { x: 80, y: 780 }, end: { x: 80, y: 80 }, thickness: 20 },
-        // Bedroom divider
         { id: 'w5', start: { x: 580, y: 80 }, end: { x: 580, y: 780 }, thickness: 15 },
-        // Interior closet / divider
         { id: 'w6', start: { x: 80, y: 520 }, end: { x: 320, y: 520 }, thickness: 12 },
         { id: 'w7', start: { x: 320, y: 520 }, end: { x: 320, y: 780 }, thickness: 12 },
       ],
@@ -157,7 +146,6 @@ export const TEMPLATES: Record<string, { name: string; state: FloorplanState }> 
         { id: 'win3', x: 980, y: 450, width: 160, thickness: 20, rotation: 90 },
       ],
       furniture: [
-        // Bedroom
         {
           id: 'fb1',
           catalogId: 'bed_king',
@@ -197,7 +185,6 @@ export const TEMPLATES: Record<string, { name: string; state: FloorplanState }> 
           color: '#92400e',
           iconType: 'nightstand',
         },
-        // Living & Dining
         {
           id: 'fl1',
           catalogId: 'sofa_3seat',

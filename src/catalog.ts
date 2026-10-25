@@ -1,7 +1,6 @@
 import { FurnitureCatalogItem } from './types';
 
 export const FURNITURE_CATALOG: FurnitureCatalogItem[] = [
-  // Beds
   {
     catalogId: 'bed_king',
     name: 'King Bed',
@@ -52,8 +51,6 @@ export const FURNITURE_CATALOG: FurnitureCatalogItem[] = [
     iconType: 'nightstand',
     description: 'Bedside nightstand (0.50m x 0.45m / 20" x 18")',
   },
-
-  // Tables
   {
     catalogId: 'dining_table_6',
     name: 'Dining Table (6P)',
@@ -104,8 +101,6 @@ export const FURNITURE_CATALOG: FurnitureCatalogItem[] = [
     iconType: 'table_rect',
     description: 'Accent side / end table (0.50m x 0.50m / 20" x 20")',
   },
-
-  // Chairs & Seating
   {
     catalogId: 'sofa_3seat',
     name: '3-Seat Sofa',
@@ -156,7 +151,6 @@ export const FURNITURE_CATALOG: FurnitureCatalogItem[] = [
     iconType: 'dining_chair',
     description: 'Standard dining room chair (0.48m x 0.52m / 19" x 20")',
   },
-
   {
     catalogId: 'office_desk',
     name: 'Standard Desk',

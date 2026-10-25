@@ -17,14 +17,10 @@ export const BASIC_SHAPES: { id: BasicShapeKind; label: string }[] = [
 
 const regularPolygon = (sides: number, rotationOffset = -Math.PI / 2): Point[] =>
   Array.from({ length: sides }, (_, i) => {
-    const a = rotationOffset + (i * 2 * Math.PI) / sides;
-    return { x: Math.cos(a) * 0.5, y: Math.sin(a) * 0.5 };
+    const angle = rotationOffset + (i * 2 * Math.PI) / sides;
+    return { x: Math.cos(angle) * 0.5, y: Math.sin(angle) * 0.5 };
   });
 
-/**
- * Returns normalized polygon vertices in [-0.5, 0.5] for polygonal shapes.
- * Returns null for shapes rendered as native SVG primitives (rect, rounded rect, ellipse).
- */
 export function getNormalizedShapePoints(
   shape: CustomShapeKind | undefined,
   points?: Point[]
@@ -75,15 +71,10 @@ export function getNormalizedShapePoints(
   }
 }
 
-/** Scales normalized points to an SVG `points` attribute string. */
 export function toSvgPoints(points: Point[], width: number, depth: number): string {
   return points.map((p) => `${(p.x * width).toFixed(2)},${(p.y * depth).toFixed(2)}`).join(' ');
 }
 
-/**
- * Normalizes absolute (cm) vertices to [-0.5, 0.5] around their bounding box center.
- * Returns the bounding box width/depth alongside.
- */
 export function normalizePolygon(abs: Point[]): { points: Point[]; width: number; depth: number } {
   const xs = abs.map((p) => p.x);
   const ys = abs.map((p) => p.y);
@@ -95,6 +86,7 @@ export function normalizePolygon(abs: Point[]): { points: Point[]; width: number
   const depth = Math.max(maxY - minY, 1);
   const cx = (minX + maxX) / 2;
   const cy = (minY + maxY) / 2;
+
   return {
     width,
     depth,

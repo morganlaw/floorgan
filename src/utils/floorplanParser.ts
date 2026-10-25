@@ -10,20 +10,13 @@ import type {
 } from '../types';
 
 export interface ParseOptions {
-  /** 0 = Auto threshold, 1..250 = manual darkness threshold */
-  threshold: number;
-  /** Minimum wall thickness in processing pixels (filters thin text, toilets, sinks, counters) */
-  minWallThicknessPx: number;
-  /** Minimum wall segment length in cm */
-  minWallLengthCm: number;
-  /** Target real-world width of the floorplan bounding box in meters */
-  targetWidthMeters: number;
-  /** Fill double-line hollow walls before erosion (only for unpainted CAD double-line plans) */
-  closeHollowWalls: boolean;
-  /** Detect doors and windows in collinear wall gaps */
-  detectOpenings: boolean;
-  /** Invert image brightness (for light-on-dark CAD blueprints) */
-  invert: boolean;
+    threshold: number;
+    minWallThicknessPx: number;
+    minWallLengthCm: number;
+    targetWidthMeters: number;
+    closeHollowWalls: boolean;
+    detectOpenings: boolean;
+    invert: boolean;
 }
 
 export const DEFAULT_PARSE_OPTIONS: ParseOptions = {
@@ -42,13 +35,10 @@ export interface DetectedDimension {
   unit: Unit;
   widthCm: number;
   heightCm?: number;
-  /** Center position in floorplan world coordinates (cm) */
-  xCm: number;
+    xCm: number;
   yCm: number;
-  /** Matched enclosing room or wall span in processing pixels */
-  matchedSpanPx?: { x1: number; y1: number; x2: number; y2: number };
-  /** Implied cm-per-pixel scale ratio from this dimension */
-  impliedCmPerPx?: number;
+    matchedSpanPx?: { x1: number; y1: number; x2: number; y2: number };
+    impliedCmPerPx?: number;
 }
 
 export interface RawDimensionCandidate {
@@ -57,8 +47,7 @@ export interface RawDimensionCandidate {
   unit: Unit;
   val1Cm: number;
   val2Cm?: number;
-  /** Center in processing canvas pixels (0..procW, 0..procH) */
-  cxPx: number;
+    cxPx: number;
   cyPx: number;
 }
 
@@ -92,37 +81,24 @@ export interface ParseResult {
 
 export interface RawSegment {
   axis: 'h' | 'v';
-  /** Fixed coordinate (y for 'h', x for 'v') in px or cm */
-  pos: number;
-  /** Start along axis (x1 for 'h', y1 for 'v') in px or cm */
-  start: number;
-  /** End along axis (x2 for 'h', y2 for 'v') in px or cm */
-  end: number;
-  /** Measured thickness in px or cm */
-  thickness: number;
+    pos: number;
+    start: number;
+    end: number;
+    thickness: number;
 }
 
 export interface SegmentationMasks {
-  /** Processing width & height (downscaled up to MAX_PROC_DIM = 750) */
-  width: number;
+    width: number;
   height: number;
-  /** 0/1 mask of solid structural walls */
-  structuralMask: Uint8Array;
-  /** Raw thresholded mask (0/1) for preview & fallback inspection */
-  rawMask: Uint8Array;
-  /** Bitflag mask: bit 0 (1) = raw/door, bit 1 (2) = hRidge, bit 2 (4) = vRidge */
-  detailMask: Uint8Array;
-  /** Optional explicit door & window probability/binary masks (0/1) from ML backend */
-  doorMask?: Uint8Array;
+    structuralMask: Uint8Array;
+    rawMask: Uint8Array;
+    detailMask: Uint8Array;
+    doorMask?: Uint8Array;
   windowMask?: Uint8Array;
-  /** Pre-extracted window band segments in processing pixels */
-  winBandsPx: RawSegment[];
-  /** Dominant wall thickness in processing pixels */
-  dominantWallThickPx: number;
-  /** Kernel size used (or equivalent) */
-  autoKernelPx: number;
-  /** Computed threshold (for Otsu mode) */
-  computedThreshold: number;
+    winBandsPx: RawSegment[];
+    dominantWallThickPx: number;
+    autoKernelPx: number;
+    computedThreshold: number;
 }
 
 export const ORIGIN_OFFSET_X = 100;
@@ -130,23 +106,17 @@ export const ORIGIN_OFFSET_Y = 100;
 export const MAX_PROC_DIM = 750;
 
 export interface HeuristicConfig {
-  /** Max RGB chroma (max-min) before non-dark pixels (> chromaMinLum) are whitened as colored room fills */
-  chromaThreshold: number;
+    chromaThreshold: number;
   chromaMinLum: number;
-  /** Integral-image local adaptive contrast filter to reject uniform gray/colored room fills */
-  useLocalAdaptive: boolean;
+    useLocalAdaptive: boolean;
   localRadius: number;
   localDelta: number;
   darkWallFloor: number;
-  /** Maximum simultaneous H and V run length before a 2D solid block is stripped as a non-wall fill */
-  maxSolidBlobSpanPx: number;
-  /** Ratio of thin (1-3px) runs to solid (5-16px) runs that triggers wider double-line closing */
-  doubleLineRatioTrigger: number;
+    maxSolidBlobSpanPx: number;
+    doubleLineRatioTrigger: number;
   doubleLineMaxGapPx: number;
-  /** Max search distance (in px) for parallel walls when classifying exterior vs interior spans */
-  exteriorBlockerMaxDistPx: number;
-  /** Prevent doors with threshold lines + swing arcs from being misclassified as windows */
-  rejectWindowIfDoorSwing: boolean;
+    exteriorBlockerMaxDistPx: number;
+    rejectWindowIfDoorSwing: boolean;
 }
 
 export const DEFAULT_HEURISTIC_CONFIG: HeuristicConfig = {
@@ -173,10 +143,6 @@ export function getHeuristicConfig(): HeuristicConfig {
   return activeHeuristicConfig;
 }
 
-/**
- * Computes optimal binarization threshold (0..255) on a grayscale array.
- * Avoids thresholding light-gray bathroom floor tiles when solid black/dark-gray walls exist.
- */
 function computeOtsuThreshold(gray: Uint8Array): number {
   const hist = new Int32Array(256);
   const total = gray.length;
@@ -187,8 +153,6 @@ function computeOtsuThreshold(gray: Uint8Array): number {
     if (v < 70) veryDarkCount++;
   }
 
-  // If the floorplan has clear dark ink (<70 luminance makes up at least 1.5% of pixels),
-  // cap the threshold at 135 so light-gray floor tiles (170..235) are ignored.
   const hasStrongBlackWalls = veryDarkCount > total * 0.015;
 
   let sum = 0;
@@ -219,13 +183,6 @@ function computeOtsuThreshold(gray: Uint8Array): number {
   return Math.min(Math.max(bestThreshold, 65), maxAllowed);
 }
 
-/**
- * Connected-Component Filter (8-connected BFS):
- * Removes all isolated small islands from the binary mask BEFORE wall detection:
- * - Individual letters & words ("KITCHEN", "STUDY", "BATH", "9'3\" x 7'10\"", "REF", "DW", "W/D")
- * - Standalone icons (compass rose, entry arrows, stove burner rings)
- * - Detached small fixtures
- */
 function filterConnectedComponents(
   mask: Uint8Array,
   w: number,
@@ -290,7 +247,6 @@ function filterConnectedComponents(
       const fillRatio = area / bboxArea;
       const aspectRatio = maxSpan / minSpan;
 
-      // Check if component contains at least one 4x4 solid structural wall core
       let hasSolidCore = false;
       if (maxSpan >= minSpanPx && minSpan >= 4) {
         for (let i = 0; i < componentPixels.length; i += 2) {
@@ -312,10 +268,6 @@ function filterConnectedComponents(
         }
       }
 
-      // 1. Any component smaller than minSpanPx (all letters, digits, stove rings, entry arrows) -> erase
-      // 2. Any compact thin-line hollow blob (like a compass rose or standalone toilet/sink)
-      //    that lacks a solid structural wall core -> erase
-      // 3. Screenshot UI pill/bar touching the extreme top/bottom image border -> erase
       const isSmallIsland = maxSpan < minSpanPx || area < minSpanPx * 2.5;
       const isCompactIconOrText =
         !hasSolidCore &&
@@ -338,13 +290,9 @@ function filterConnectedComponents(
   return out;
 }
 
-/**
- * Estimates the dominant thickness (in pixels) of structural walls vs. thin fixture outlines.
- */
 function estimateStructuralWallThickness(mask: Uint8Array, w: number, h: number): number {
   const runHist = new Int32Array(32);
 
-  // Sample horizontal and vertical run lengths
   for (let y = 0; y < h; y += 2) {
     const row = y * w;
     let run = 0;
@@ -370,8 +318,6 @@ function estimateStructuralWallThickness(mask: Uint8Array, w: number, h: number)
     }
   }
 
-  // Find the peak run thickness in the structural wall range [4..22]
-  // weighting thicker runs slightly so 1-2px fixture lines don't dominate
   let bestT = 5;
   let bestScore = 0;
   for (let t = 4; t <= 20; t++) {
@@ -385,10 +331,6 @@ function estimateStructuralWallThickness(mask: Uint8Array, w: number, h: number)
   return bestT;
 }
 
-/**
- * 1D horizontal + vertical morphological closing to fill narrow hollow gaps inside double-line CAD walls,
- * while ignoring periodic multi-line comb patterns (closet shelf stripes, staircase treads, floor tile grids).
- */
 function closeDoubleLineGaps(
   mask: Uint8Array,
   w: number,
@@ -404,7 +346,6 @@ function closeDoubleLineGaps(
       if (mask[rowOffset + x]) {
         const gap = x - lastOn - 1;
         if (lastOn >= 2 && gap >= 1 && gap <= maxGap) {
-          // Verify outer neighborhood has no parallel 3rd line (window bands, shelves, stairs)
           let outerRuns = 0;
           let inRun = false;
           for (let ox = Math.max(0, lastOn - 10); ox <= lastOn - 2; ox++) {
@@ -498,11 +439,6 @@ function closeDoubleLineGaps(
   return finalOut;
 }
 
-/**
- * Exact kernelSize x kernelSize box erosion followed by box dilation (morphological opening).
- * Any stroke thinner than kernelSize (such as 1-3px toilet bowls, sinks, bathtubs, kitchen counters,
- * door swing arcs, or text letters) is completely erased.
- */
 function morphologicalOpen(
   mask: Uint8Array,
   w: number,
@@ -513,7 +449,6 @@ function morphologicalOpen(
   const kLeft = Math.floor((kernelSize - 1) / 2);
   const kRight = kernelSize - 1 - kLeft;
 
-  // Erode horizontally by exact kernelSize
   const temp = new Uint8Array(w * h);
   for (let y = 0; y < h; y++) {
     const row = y * w;
@@ -529,7 +464,6 @@ function morphologicalOpen(
     }
   }
 
-  // Erode vertically by exact kernelSize
   const eroded = new Uint8Array(w * h);
   for (let y = kLeft; y < h - kRight; y++) {
     const row = y * w;
@@ -545,7 +479,6 @@ function morphologicalOpen(
     }
   }
 
-  // Dilate horizontally back by exact kernelSize
   const tempDilate = new Uint8Array(w * h);
   for (let y = 0; y < h; y++) {
     const row = y * w;
@@ -561,7 +494,6 @@ function morphologicalOpen(
     }
   }
 
-  // Dilate vertically back by exact kernelSize
   const opened = new Uint8Array(w * h);
   for (let y = kRight; y < h - kLeft; y++) {
     const row = y * w;
@@ -580,11 +512,6 @@ function morphologicalOpen(
   return opened;
 }
 
-/**
- * Extracts sub-pixel / anti-aliased 1px fine detail ridges (for window symbols & door arcs that
- * fall above Otsu threshold due to downscaling) and directly extracts multi-line window bands.
- * Encodes detailMask bitflags: bit 0 (1) = rawMask, bit 1 (2) = hRidge, bit 2 (4) = vRidge.
- */
 function extractFineDetailAndWindowBands(
   gray: Uint8Array,
   rawMask: Uint8Array,
@@ -676,7 +603,6 @@ function extractFineDetailAndWindowBands(
     gaps: number;
   }
 
-  // Extract horizontal multi-line window bands (2..5 parallel thin hRidge strokes within 3..16px)
   const hColRuns: WinCrossRun[][] = Array.from({ length: w }, () => []);
   for (let x = 2; x < w - 2; x++) {
     let y = 2;
@@ -793,7 +719,6 @@ function extractFineDetailAndWindowBands(
   }
   finishedHWin.push(...activeHWin);
 
-  // Extract vertical multi-line window bands (2..5 parallel thin vRidge strokes within 3..16px)
   const vRowRuns: WinCrossRun[][] = Array.from({ length: h }, () => []);
   for (let y = 2; y < h - 2; y++) {
     const row = y * w;
@@ -932,8 +857,6 @@ function extractFineDetailAndWindowBands(
       })),
   ];
 
-  // Suppress duplicate inner/outer parallel window bands across deep facade piers (within 28px with >=65% overlap),
-  // keeping the outer band closer to the building perimeter.
   const winBandsPx = rawWinBandsPx.filter((wb, idx) => {
     const wbLen = wb.end - wb.start;
     const midCanvas = wb.axis === 'h' ? h * 0.5 : w * 0.5;
@@ -959,9 +882,6 @@ function extractFineDetailAndWindowBands(
   return { detailMask, winBandsPx };
 }
 
-/**
- * Extracts directional wall bands (horizontal & vertical) from the cleaned binary wall mask.
- */
 function extractDirectionalWallSegments(
   wallMask: Uint8Array,
   w: number,
@@ -1010,7 +930,6 @@ function extractDirectionalWallSegments(
     junctionGap: number;
   }
 
-  // 1. Extract Horizontal Segments by chaining vertical column runs [y0, y1] across x = 0..w-1
   const colRuns: ColRun[][] = Array.from({ length: w }, () => []);
   for (let x = 0; x < w; x++) {
     let y = 0;
@@ -1083,7 +1002,6 @@ function extractDirectionalWallSegments(
         continue;
       }
 
-      // Check if column x is a vertical wall junction or Poché pier that covers avgYc
       let throughJunction = false;
       for (let i = 0; i < runs.length; i++) {
         const r = runs[i];
@@ -1131,13 +1049,10 @@ function extractDirectionalWallSegments(
     const avgT = c.tSum / c.validCols;
     const halfT = Math.max(4, Math.min(7, Math.round(avgT * 0.55)));
 
-    // If the chain ended inside a perpendicular junction or corner step without resuming normal runs,
-    // trim c.end to the centerline of that corner/junction unless it ran through a wide corner pier
     if (c.end > c.lastNormalEnd && c.end - c.lastNormalEnd <= maxWallThicknessPx) {
       c.end = c.lastNormalEnd + Math.min(halfT, c.end - c.lastNormalEnd);
     }
 
-    // Extend c.start backward into an abutting perpendicular wall or corner step block
     let backGap = 0;
     let touchedPerpWall = false;
     let touchedStepBlock = false;
@@ -1179,7 +1094,6 @@ function extractDirectionalWallSegments(
     }
   }
 
-  // 2. Extract Vertical Segments by chaining horizontal row runs [x0, x1] across y = 0..h-1
   const rowRuns: RowRun[][] = Array.from({ length: h }, () => []);
   for (let y = 0; y < h; y++) {
     const row = y * w;
@@ -1343,7 +1257,6 @@ function extractDirectionalWallSegments(
     }
   }
 
-  // Only suppress a parallel stub if its cross-axis wall thickness interval actually overlaps a longer wall
   const suppressParallelStubs = (segs: RawSegment[]): RawSegment[] =>
     segs.filter((seg, idx) => {
       const segLen = seg.end - seg.start;
@@ -1410,17 +1323,12 @@ function extractDirectionalWallSegments(
   return [...hSegs, ...vSegs];
 }
 
-/**
- * Helper to decode an imperial feet/inches token where OCR may have dropped the apostrophe:
- * e.g. "9'3\"" -> 9ft 3in; "93\"" -> 9ft 3in; "710\"" -> 7ft 10in; "106\"" -> 10ft 6in; "9'" -> 9ft 0in.
- */
 function parseImperialTokenToCm(
   rawDigits1: string,
   sep1: string | undefined,
   rawDigits2: string | undefined
 ): number | null {
   if (rawDigits2 !== undefined && rawDigits2 !== '') {
-    // Explicit feet and inches: e.g. 13'8" or 9'3"
     const ft = parseInt(rawDigits1, 10);
     const inches = parseInt(rawDigits2, 10);
     if (ft >= 2 && ft <= 60 && inches >= 0 && inches < 12) {
@@ -1431,12 +1339,10 @@ function parseImperialTokenToCm(
   const n = parseInt(rawDigits1, 10);
   if (isNaN(n)) return null;
 
-  // If 1 or 2 digits <= 45 with ' or ": e.g. "9'" or "12'"
   if (n >= 3 && n <= 45 && (sep1 === "'" || !sep1)) {
     return Math.round(n * 12 * 2.54);
   }
 
-  // OCR dropped the apostrophe between feet and inches (e.g. "93\"", "58\"", "87\"", "710\"", "106\"")
   if (rawDigits1.length === 2 && n >= 30 && n <= 99) {
     const ft = parseInt(rawDigits1[0], 10);
     const inches = parseInt(rawDigits1[1], 10);
@@ -1477,13 +1383,6 @@ function formatImperialCm(cm: number): string {
   return inches > 0 ? `${ft}'${inches}"` : `${ft}'`;
 }
 
-/**
- * Parses architectural dimension strings from OCR text lines/words into centimeters.
- * Supports:
- * - Metric pairs: "5.2m x 3.8m", "5.20 x 3.80 m", "520 x 380 cm"
- * - Imperial pairs (even when OCR drops the ' apostrophe): "9'3\" x 7'10\"", "93\" x 710\"", "10'6\" x 9'"
- * - Single wall callouts: "5.2m", "420 cm", "14' 6\""
- */
 export function parseDimensionText(
   text: string
 ): { kind: 'pair' | 'single'; unit: Unit; val1Cm: number; val2Cm?: number; matchedText: string } | null {
@@ -1495,7 +1394,6 @@ export function parseDimensionText(
     .replace(/''/g, '"')
     .trim();
 
-  // 1. Imperial feet/inches pair (handles both "13'8\" x 10'5\"" and OCR-dropped-apostrophe "93\" x 710\"" or "106\" x 9'")
   const impFlexRegex =
     /(\d{1,4})\s*(['"])?\s*(?:-\s*)?(?:(\d{1,2})\s*"?)?\s*[xX]\s*(\d{1,4})\s*(['"])?\s*(?:-\s*)?(?:(\d{1,2})\s*"?)?/;
   const impFlexMatch = cleaned.match(impFlexRegex);
@@ -1517,7 +1415,6 @@ export function parseDimensionText(
     }
   }
 
-  // 2. Metric or decimal pair: e.g. "5.2m x 3.8m", "5.20 x 3.80m", "520 x 380 cm", "4.5 x 3.2"
   const metricPairRegex =
     /(\d{1,4}(?:[.,]\d{1,2})?)\s*(mm|cm|m|ft|')?\s*[xX]\s*(\d{1,4}(?:[.,]\d{1,2})?)\s*(mm|cm|m|ft|')?/i;
   const metricPairMatch = cleaned.match(metricPairRegex);
@@ -1543,7 +1440,6 @@ export function parseDimensionText(
       cm2 = raw2 * 30.48;
       unit = 'ft';
     } else if (unitToken === 'm') {
-      // Handle OCR dropped decimal point in 3-digit meter dimensions like "434x426m" (4.34 x 4.26 m)
       cm1 = raw1 >= 100 && raw1 <= 999 && !/[.,]/.test(metricPairMatch[1]) ? raw1 : raw1 * 100;
       cm2 = raw2 >= 100 && raw2 <= 999 && !/[.,]/.test(metricPairMatch[3]) ? raw2 : raw2 * 100;
     } else {
@@ -1580,7 +1476,6 @@ export function parseDimensionText(
     }
   }
 
-  // 3. Single Imperial dimension callout: e.g. "14' 6\""
   const impSingleRegex = /\b(\d{1,2})\s*'\s*(?:-\s*)?(\d{1,2})\s*"/;
   const impSingleMatch = cleaned.match(impSingleRegex);
   if (impSingleMatch) {
@@ -1597,7 +1492,6 @@ export function parseDimensionText(
     }
   }
 
-  // 4. Single Metric/Explicit-Unit dimension callout: e.g. "5.20 m", "450 cm", "4500 mm", "16.5 ft"
   const singleExplicitRegex = /\b(\d{1,4}(?:[.,]\d{1,2})?)\s*(mm|cm|m|ft)\b/i;
   const singleMatch = cleaned.match(singleExplicitRegex);
   if (singleMatch) {
@@ -1625,11 +1519,6 @@ export function parseDimensionText(
   return null;
 }
 
-/**
- * Deterministically matches OCR dimension candidates against the extracted pixel wall geometry
- * using 4-directional ray casting, partial wing-wall detection for open-plan rooms,
- * and consensus scale verification.
- */
 function matchDimensionsToPixelWalls(
   candidates: RawDimensionCandidate[],
   rawSegmentsPx: RawSegment[],
@@ -1653,7 +1542,6 @@ function matchDimensionsToPixelWalls(
     };
   }
 
-  // Bridge collinear/stepped doorway gaps up to 62px wide so room rays never escape through open doorways
   const bridgeWallGapsForRays = (segs: RawSegment[]): RawSegment[] => {
     const out = [...segs];
     for (let i = 0; i < segs.length; i++) {
@@ -1704,7 +1592,6 @@ function matchDimensionsToPixelWalls(
       let topWall: RawSegment | null = null;
       let bottomWall: RawSegment | null = null;
 
-      // Tight cross margin (12px) so short corner notches don't intercept rays before the main room wall
       const crossMarginPx = 12;
 
       for (const hw of hWalls) {
@@ -1750,7 +1637,6 @@ function matchDimensionsToPixelWalls(
       let leftX = leftWall ? leftWall.pos : null;
       let rightX = rightWall ? rightWall.pos : null;
 
-      // If one side of the room is a full-height window, use the shared endpoint of topWall & bottomWall
       if (topWall && bottomWall) {
         if (rightX === null && Math.abs(topWall.end - bottomWall.end) < 20 && topWall.end > cxPx) {
           rightX = Math.round((topWall.end + bottomWall.end) / 2);
@@ -1806,7 +1692,6 @@ function matchDimensionsToPixelWalls(
           });
           continue;
         } else {
-          // Record individual axis scales for consensus verification against other rooms
           fallbackAxisScales.push({
             idx,
             scales: [directRatioX, directRatioY, swappedRatioX, swappedRatioY].filter(
@@ -1883,8 +1768,6 @@ function matchDimensionsToPixelWalls(
   let cmPerPxY: number | null = null;
 
   if (verifiedRooms.length > 0) {
-    // Anchor on the largest verified room and weight by (areaPx^2) / (0.005 + diff^2)
-    // so large primary rooms with tight X/Y agreement dominate over small utility rooms
     const largestRoom = verifiedRooms.reduce((a, b) => (b.areaPx > a.areaPx ? b : a));
     const inliers = verifiedRooms.filter(
       (r) => Math.abs(r.scale - largestRoom.scale) / largestRoom.scale <= 0.18
@@ -1911,7 +1794,6 @@ function matchDimensionsToPixelWalls(
       cmPerPxY = medianCmPerPx;
     }
 
-    // Resolve any open-plan rooms where one axis matched the consensus scale
     for (const fb of fallbackAxisScales) {
       let bestS: number | null = null;
       let bestRelErr = 0.2;
@@ -1970,9 +1852,6 @@ function matchDimensionsToPixelWalls(
   };
 }
 
-/**
- * Recognizes standard architectural room names from OCR text lines.
- */
 export function parseRoomNameText(text: string): string | null {
   const cleaned = text.replace(/[^a-zA-Z0-9 &/.-]/g, ' ').replace(/\s+/g, ' ').trim();
   if (cleaned.length < 3) return null;
@@ -2005,11 +1884,6 @@ export function parseRoomNameText(text: string): string | null {
   return null;
 }
 
-/**
- * Runs client-side Tesseract OCR on the floorplan image and extracts:
- * 1. Printed dimension strings ("9'3\" x 7'10\"", "5.2m x 3.4m") for scale calibration
- * 2. All text bounding boxes (so text regions are masked out from wall detection)
- */
 export async function extractOcrDimensionsFromImage(
   img: HTMLImageElement,
   invert = false
@@ -2071,7 +1945,6 @@ export async function extractOcrDimensionsFromImage(
           const cxPx = (x0Px + x1Px) / 2;
           const cyPx = (y0Px + y1Px) / 2;
 
-          // Record text box if it contains alphanumeric letters/digits (not vertical wall pipes "|")
           if (/[a-zA-Z0-9]{2,}/.test(line.text) && y1Px - y0Px < procH * 0.12) {
             textBoxes.push({ x0: x0Px, y0: y0Px, x1: x1Px, y1: y1Px });
           }
@@ -2098,12 +1971,6 @@ export async function extractOcrDimensionsFromImage(
   }
 }
 
-/**
- * Topological Graph Regularizer:
- * 1. Groups collinear wall segments within tight pixel-jitter tolerance (preserving architectural steps).
- * 2. Detects collinear and corner-connected doorway/window openings and bridges the underlying wall.
- * 3. Snaps perpendicular L, T, and + corner junctions and small step offsets so rooms form closed polygons.
- */
 export function regularizeFloorplanGraph(
   segmentsCm: RawSegment[],
   rawBinaryMask: Uint8Array | null,
@@ -2231,11 +2098,7 @@ export function regularizeFloorplanGraph(
     }
   }
 
-  /**
-   * Checks whether a span along a wall is on an exterior boundary and contains continuous thin
-   * parallel window lines (at least 2 distinct parallel strokes across the span, without a door swing).
-   */
-  function hasWindowBandInRawMask(
+    function hasWindowBandInRawMask(
     axis: 'h' | 'v',
     posCm: number,
     startCm: number,
@@ -2252,8 +2115,6 @@ export function regularizeFloorplanGraph(
     const span = pxEnd - pxStart;
     if (span < 12) return false;
 
-    // If the opening is door-sized (<= 58px) and has a prominent door swing arc/leaf protruding
-    // perpendicular to the wall (|d| in 9..34px), classify it as a door rather than a window.
     if (activeHeuristicConfig.rejectWindowIfDoorSwing && span <= 58) {
       const swingDepth = Math.min(34, Math.max(16, Math.round(span * 0.75)));
       let posSwingCols = 0;
@@ -2344,11 +2205,7 @@ export function regularizeFloorplanGraph(
     );
   }
 
-  /**
-   * Verifies that a candidate doorway gap is not an empty open-plan room passage nor blocked
-   * by an intersecting structural wall, and contains thin door leaf / swing arc / bi-fold pixels.
-   */
-  function hasDoorSignatureInRawMask(
+    function hasDoorSignatureInRawMask(
     axis: 'h' | 'v',
     posCm: number,
     startCm: number,
@@ -2400,11 +2257,7 @@ export function regularizeFloorplanGraph(
     return nearLineThinPixels >= 2 && swingZoneThinPixels >= 4 && thinPixels >= 8;
   }
 
-  /**
-   * Extends a wall segment's start and end coordinates across any contiguous thick structural
-   * pier / Poché block in structuralMask so walls and facade window bands connect through piers.
-   */
-  function extendSpanThroughStructuralPiers(
+    function extendSpanThroughStructuralPiers(
     axis: 'h' | 'v',
     posCm: number,
     startCm: number,
@@ -2475,11 +2328,7 @@ export function regularizeFloorplanGraph(
     return Math.round(Math.min(maxD, Math.max(minD, gapCm * 0.92)) / 5) * 5;
   }
 
-  /**
-   * Infers door open direction (`rotation`: 0 | 90 | 180 | 270) and hinge jamb (`swingDirection`: 'left' | 'right')
-   * from thin door-leaf and quarter-circle swing-arc pixels in `rawBinaryMask`.
-   */
-  function inferDoorSwingAndRotation(
+    function inferDoorSwingAndRotation(
     axis: 'h' | 'v',
     posCm: number,
     startCm: number,
@@ -2495,10 +2344,6 @@ export function regularizeFloorplanGraph(
     const pxEnd = Math.round(Math.max(startCm, endCm) / spanScale);
     const span = Math.max(8, pxEnd - pxStart);
 
-    // 4-way geometric template matcher over (openSign ∈ {+1, -1}, hingeSide ∈ {'start', 'end'}):
-    // 1. Straight door leaf extending perpendicular from the hinge jamb (length ~span),
-    //    discounted if the line continues past 1.15 * span (which indicates a perpendicular wall).
-    // 2. Quarter-circle swing arc from the leaf tip to the latch jamb in non-structural rawBinaryMask.
     let bestOpenSign: 1 | -1 = 1;
     let bestHingeAtStart = true;
     let bestScore = -1;
@@ -2508,7 +2353,6 @@ export function regularizeFloorplanGraph(
         const tHinge = hingeAtStart ? pxStart : pxEnd;
         const dirT = hingeAtStart ? 1 : -1;
 
-        // 1. Leaf score along perpendicular ray at tHinge
         let leafHits = 0;
         let leafTotal = 0;
         const rMin = Math.max(4, Math.round(span * 0.2));
@@ -2535,7 +2379,6 @@ export function regularizeFloorplanGraph(
           if (hit) leafHits++;
         }
 
-        // Check if the perpendicular line continues past the door radius (indicates a structural T-wall)
         let beyondHits = 0;
         let beyondTotal = 0;
         const bMin = Math.round(span * 1.15);
@@ -2565,7 +2408,6 @@ export function regularizeFloorplanGraph(
         const beyondRatio = beyondHits / Math.max(1, beyondTotal);
         const leafScore = beyondRatio > 0.6 ? rawLeafRatio * 0.2 : rawLeafRatio;
 
-        // 2. Quarter-circle arc score from 18° to 72° in non-structural rawBinaryMask
         let arcHits = 0;
         let arcTotal = 0;
         for (let deg = 18; deg <= 72; deg += 4) {
@@ -2762,7 +2604,6 @@ export function regularizeFloorplanGraph(
   function groupCollinear(segs: RawSegment[], axis: 'h' | 'v'): RawSegment[] {
     const groups: RawSegment[][] = [];
 
-    // Pass 1: Group strictly collinear segments (within 2.5px)
     for (const seg of segs) {
       let matchedGroup: RawSegment[] | null = null;
       for (const grp of groups) {
@@ -2782,7 +2623,6 @@ export function regularizeFloorplanGraph(
       }
     }
 
-    // Pass 2: Merge adjacent groups within touchingCollinearToleranceCm (6px) that touch or overlap end-to-end
     let mergedAny = true;
     while (mergedAny) {
       mergedAny = false;
@@ -2820,7 +2660,6 @@ export function regularizeFloorplanGraph(
   const cleanH = groupCollinear(hSegs, 'h');
   const cleanV = groupCollinear(vSegs, 'v');
 
-  // 1. Connect small architectural steps between adjacent horizontal walls before corner-opening detection
   for (let i = 0; i < cleanH.length; i++) {
     for (let j = i + 1; j < cleanH.length; j++) {
       const h1 = cleanH[i];
@@ -2884,7 +2723,6 @@ export function regularizeFloorplanGraph(
     }
   }
 
-  // 2. Connect small architectural steps between adjacent vertical walls
   for (let i = 0; i < cleanV.length; i++) {
     for (let j = i + 1; j < cleanV.length; j++) {
       const v1 = cleanV[i];
@@ -2964,7 +2802,6 @@ export function regularizeFloorplanGraph(
         yPos <= v.end + cornerSnapToleranceCm
     );
 
-  // Detect corner-connected doors and windows (where one side of the opening is a perpendicular wall)
   if (useHeuristicOpenings) {
     for (const v of cleanV) {
       if (!vTouchesH(v.pos, v.start)) {
@@ -3207,7 +3044,6 @@ export function regularizeFloorplanGraph(
       }
     }
 
-    // Detect closet/alcove doors spanning between two matching parallel side walls that both terminate at the opening line
     const sortedV = [...cleanV].sort((a, b) => a.pos - b.pos);
     for (let i = 0; i < sortedV.length; i++) {
       for (let j = i + 1; j < sortedV.length; j++) {
@@ -3338,7 +3174,6 @@ export function regularizeFloorplanGraph(
       }
     }
 
-    // Integrate multi-line exterior window bands (e.g. corner-meeting windows or floor-to-ceiling window walls)
     const exteriorWinBands = winBandsCm
       .filter((wb) => isExteriorSpan(wb.axis, wb.pos, wb.start, wb.end))
       .map((wb) => {
@@ -3456,7 +3291,6 @@ export function regularizeFloorplanGraph(
       }
     }
 
-    // Bridge any remaining collinear doorway gaps (such as doorways between a solid wall and a newly integrated exterior window wall)
     const bridgeRemainingDoorwayGaps = (list: RawSegment[], axis: 'h' | 'v') => {
       const maxPosDiff = pxToCm(5);
       let changed = true;
@@ -3521,8 +3355,6 @@ export function regularizeFloorplanGraph(
     bridgeRemainingDoorwayGaps(cleanV, 'v');
   }
 
-  // Snap orthogonal L-corners and T-junctions between cleanH and cleanV
-  // Crucial: only snap the closer endpoint (start vs end) and never collapse short L-corner walls!
   for (const h of cleanH) {
     for (const v of cleanV) {
       const hNearVYRange =
@@ -3583,9 +3415,6 @@ export function regularizeFloorplanGraph(
     });
   }
 
-  // Direct ML Opening Extraction & Wall Snapping:
-  // When `mlDoorMask` or `mlWindowMask` is provided by the neural network, extract connected
-  // components directly from the semantic masks and project them onto the nearest regularized wall.
   if (detectOpenings && (mlDoorMask || mlWindowMask)) {
     const extractComponentsFromMask = (
       mask: Uint8Array,
@@ -3843,19 +3672,6 @@ export function regularizeFloorplanGraph(
   return { walls, doors, windows };
 }
 
-/**
- * Deterministic Raster-to-Vector Floorplan Parser:
- * 1. Thresholds image into raw binary mask.
- * 2. Connected-Component Analysis (CCA) strips all isolated letters, numbers, stove rings, and icons.
- * 3. Masks out OCR-detected text bounding boxes (without slicing into thick structural walls).
- * 4. Estimates dominant structural wall thickness and runs exact kernelSize x kernelSize morphological opening
- *    to strip thin 1-3px fixture outlines (toilets, sinks, bathtubs, counters, door swing arcs).
- * 5. Calibrates real-world scale from OCR dimensions via 4-way ray-casting and wing-wall detection.
- */
-/**
- * Stage A (Heuristic Otsu + Morphological Opening Backend):
- * Produces SegmentationMasks from a raw RGBA pixel buffer at processing resolution (w, h).
- */
 export function segmentFloorplanOtsu(
   rgba: Uint8ClampedArray | Uint8Array,
   w: number,
@@ -3876,7 +3692,6 @@ export function segmentFloorplanOtsu(
     } else {
       let lum = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
       if (options.invert) lum = 255 - lum;
-      // Suppress colored room fills (wood, tile, pastel backgrounds) while preserving dark strokes
       const chroma = Math.max(r, g, b) - Math.min(r, g, b);
       if (
         cfg.chromaThreshold > 0 &&
@@ -3894,7 +3709,6 @@ export function segmentFloorplanOtsu(
 
   const rawMask = new Uint8Array(w * h);
   if (cfg.useLocalAdaptive && options.threshold === 0) {
-    // 2D Integral image for fast O(1) local box mean
     const stride = w + 1;
     const integral = new Float64Array((w + 1) * (h + 1));
     for (let y = 0; y < h; y++) {
@@ -3942,8 +3756,6 @@ export function segmentFloorplanOtsu(
     }
   }
 
-  // Step 1: Connected-Component Filter — immediately strips isolated text characters ("KITCHEN", "STUDY"),
-  // numbers ("9'3\" x 7'10\""), stove burner rings, compass rose, and standalone icons.
   const ccCleanedMask = filterConnectedComponents(
     rawMask,
     w,
@@ -3951,8 +3763,6 @@ export function segmentFloorplanOtsu(
     Math.max(24, Math.round(Math.max(w, h) * 0.04))
   );
 
-  // Step 1b: Strip large 2D solid blocks (where BOTH horizontal and vertical contiguous runs exceed
-  // maxSolidBlobSpanPx) so shaded room interiors or solid legend boxes cannot masquerade as walls.
   if (cfg.maxSolidBlobSpanPx > 0) {
     const maxSpan = cfg.maxSolidBlobSpanPx;
     const hRunLen = new Uint16Array(w * h);
@@ -3994,8 +3804,6 @@ export function segmentFloorplanOtsu(
     }
   }
 
-  // Step 2: Erase remaining thin text pixels inside OCR-detected text bounding boxes,
-  // while preserving thick structural wall runs (>= 5px thick in both axes) so oversized OCR boxes never clip walls
   for (const box of ocrTextBoxes) {
     const x0 = Math.max(0, box.x0 - 1);
     const y0 = Math.max(0, box.y0 - 1);
@@ -4005,7 +3813,6 @@ export function segmentFloorplanOtsu(
       const row = y * w;
       for (let x = x0; x <= x1; x++) {
         if (!ccCleanedMask[row + x]) continue;
-        // Check if (x, y) is inside a 5x5 solid structural wall core
         let solidCore = true;
         for (let dy = -2; dy <= 2 && solidCore; dy++) {
           const ny = y + dy;
@@ -4028,7 +3835,6 @@ export function segmentFloorplanOtsu(
     }
   }
 
-  // Step 3: Optional double-line closing (detect whether plan is dominated by thin 1-3px double-line walls)
   let thin13Runs = 0;
   let solid516Runs = 0;
   for (let y = 0; y < h; y += 2) {
@@ -4065,8 +3871,6 @@ export function segmentFloorplanOtsu(
       ? closeDoubleLineGaps(ccCleanedMask, w, h, closeGapPx)
       : ccCleanedMask;
 
-  // Step 4: Auto-adapt erosion kernel to structural wall thickness so thin 1-2px fixture lines
-  // (toilets, sinks, bathtubs, counters, door arcs, closet shelves) attached to walls are stripped while walls survive
   const dominantWallThickPx = estimateStructuralWallThickness(closedMask, w, h);
   const autoKernelPx = Math.max(
     options.minWallThicknessPx,
@@ -4075,8 +3879,6 @@ export function segmentFloorplanOtsu(
 
   const openedMask = morphologicalOpen(closedMask, w, h, autoKernelPx);
 
-  // Step 5: Second connected-component pass after opening to remove any small fixture stubs
-  // that became detached when their thin outline strokes were eroded away
   const structuralMask = filterConnectedComponents(
     openedMask,
     w,
@@ -4084,8 +3886,6 @@ export function segmentFloorplanOtsu(
     Math.max(20, Math.round(Math.max(w, h) * 0.035))
   );
 
-  // Step 6: Extract sub-pixel fine detail ridges (for anti-aliased 1px window lines and door arcs)
-  // and multi-line window bands
   const { detailMask, winBandsPx } = extractFineDetailAndWindowBands(
     gray,
     rawMask,
@@ -4108,11 +3908,6 @@ export function segmentFloorplanOtsu(
   };
 }
 
-/**
- * Headless (DOM-free) floorplan parser entrypoint.
- * Accepts an RGBA buffer at processing dimensions (w, h) and optional pre-computed `customMasks`
- * (e.g. from an ONNX segmentation model) and executes Stage B vectorization.
- */
 export function parseFloorplanRgbaBuffer(
   rgba: Uint8ClampedArray | Uint8Array,
   w: number,
@@ -4163,8 +3958,6 @@ export function parseFloorplanRgbaBuffer(
 
   const spanPxW = Math.max(50, maxPxX - minPxX);
 
-  // When ML door/window masks are present, trace wall segments continuously across openings
-  // so corner doorways and wide windows stay anchored to continuous structural walls.
   let wallTraceMask = structuralMask;
   if (masks.doorMask || masks.windowMask) {
     wallTraceMask = new Uint8Array(w * h);
@@ -4192,8 +3985,6 @@ export function parseFloorplanRgbaBuffer(
     spanPxW
   );
 
-  // Fallback scale calibration from ML-detected doors when floorplan has no printed dimension text:
-  // Standard residential interior doors have a median width of ~82 cm (32 inches).
   let doorCalibratedCmPerPx: number | null = null;
   let doorCalibratedWidthMeters: number | null = null;
   if (ocrMatch.cmPerPx === null && masks.doorMask) {
@@ -4250,7 +4041,6 @@ export function parseFloorplanRgbaBuffer(
 
     if (doorSpansPx.length > 0) {
       doorSpansPx.sort((a, b) => a - b);
-      // Use 40th percentile so double doors don't skew single-door median
       const refDoorPx = doorSpansPx[Math.floor(doorSpansPx.length * 0.4)];
       const impliedCmPerPx = 82 / refDoorPx;
       const impliedWidthM = (spanPxW * impliedCmPerPx) / 100;
@@ -4388,7 +4178,6 @@ export function parseFloorplanImage(
 
   const { structuralMask, rawMask, doorMask, windowMask } = result.masks;
 
-  // Visual segmentation mask preview (navy = structural walls, emerald = doors, cyan = windows, light gray = stripped noise)
   const previewCanvas = document.createElement('canvas');
   previewCanvas.width = w;
   previewCanvas.height = h;
@@ -4434,10 +4223,6 @@ export function parseFloorplanImage(
   };
 }
 
-/**
- * Fetches an image or extracts floorplan images from a website URL using CORS proxies
- * so static deployments (e.g., GitHub Pages) can import from external links.
- */
 export async function fetchFloorplanFromUrl(rawUrl: string): Promise<{
   primaryDataUrl?: string;
   candidates: { url: string; label: string }[];
@@ -4451,17 +4236,14 @@ export async function fetchFloorplanFromUrl(rawUrl: string): Promise<{
 
   const normalizedUrl = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
 
-  // 1. Try loading directly as an image via CORS-safe image proxy (wsrv.nl) first
   try {
     const directImageDataUrl = await fetchImageUrlAsDataUrl(normalizedUrl);
     if (directImageDataUrl) {
       return { primaryDataUrl: directImageDataUrl, candidates: [] };
     }
   } catch {
-    // Not a direct image or proxy couldn't decode as image; fall through to HTML page scraping
   }
 
-  // 2. Otherwise treat as a webpage URL and extract embedded floorplan <img> / og:image tags
   const htmlFetchers: (() => Promise<string>)[] = [
     async () => {
       const r = await fetch(
@@ -4527,7 +4309,6 @@ export async function fetchImageUrlAsDataUrl(imageUrl: string): Promise<string> 
         return await blobToDataUrl(blob);
       }
     } catch {
-      // try next proxy
     }
   }
 
@@ -4614,10 +4395,6 @@ function extractFloorplanImagesFromHtml(
     .map(({ url, label }) => ({ url, label }));
 }
 
-/**
- * Proportionally rescales all coordinates in FloorplanState around (100, 100)
- * when the user calibrates a reference distance on the canvas.
- */
 export function rescaleFloorplanState(
   state: FloorplanState,
   scaleFactor: number
@@ -4668,11 +4445,6 @@ export function rescaleFloorplanState(
   };
 }
 
-/**
- * Generates a realistic architectural floorplan raster image (with thick structural walls,
- * doorway gaps, thin door arcs, exterior windows, and printed room dimensions)
- * so users can test deterministic image parsing + OCR dimension auto-scaling in 1 click.
- */
 export function createSampleBlueprintDataUrl(): string {
   const canvas = document.createElement('canvas');
   canvas.width = 800;
@@ -4682,7 +4454,6 @@ export function createSampleBlueprintDataUrl(): string {
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  // Subtle thin background grid (1px - stripped by morphological opening)
   ctx.strokeStyle = '#e2e8f0';
   ctx.lineWidth = 1;
   for (let x = 0; x < canvas.width; x += 40) {
@@ -4698,41 +4469,32 @@ export function createSampleBlueprintDataUrl(): string {
     ctx.stroke();
   }
 
-  // Thick structural walls (12px exterior, 9px interior)
   ctx.fillStyle = '#0f172a';
 
-  // Top exterior wall (x=60..740, total span = 680px = 9.07m at 1.333 cm/px)
   ctx.fillRect(60, 60, 160, 12);
   ctx.fillRect(320, 60, 220, 12);
   ctx.fillRect(640, 60, 100, 12);
 
-  // Bottom exterior wall with entrance door gap [180..245]
   ctx.fillRect(60, 540, 120, 12);
   ctx.fillRect(245, 540, 495, 12);
 
-  // Left exterior wall
   ctx.fillRect(60, 60, 12, 492);
 
-  // Right exterior wall with window gap [220..330]
   ctx.fillRect(728, 60, 12, 160);
   ctx.fillRect(728, 330, 12, 222);
 
-  // Interior vertical bedroom wall (x=450) with doorway gap [340..405]
   ctx.fillRect(450, 60, 9, 280);
   ctx.fillRect(450, 405, 9, 147);
 
-  // Interior horizontal kitchen/bath divider (y=290, x=60..455) with doorway gap [260..320]
   ctx.fillRect(60, 290, 200, 9);
   ctx.fillRect(320, 290, 135, 9);
 
-  // Thin window glass pane lines (2px) inside window gaps
   ctx.strokeStyle = '#334155';
   ctx.lineWidth = 2;
   ctx.strokeRect(220, 62, 100, 8);
   ctx.strokeRect(540, 62, 100, 8);
   ctx.strokeRect(730, 220, 8, 110);
 
-  // Thin door swing arcs (1.5px)
   ctx.strokeStyle = '#64748b';
   ctx.lineWidth = 1.5;
   ctx.beginPath();
@@ -4743,7 +4505,6 @@ export function createSampleBlueprintDataUrl(): string {
   ctx.arc(455, 340, 65, 0, Math.PI / 2);
   ctx.stroke();
 
-  // Printed room names & dimension labels (read by Tesseract OCR and matched to enclosing room walls)
   ctx.fillStyle = '#334155';
   ctx.font = 'bold 18px sans-serif';
   ctx.fillText('LIVING ROOM', 175, 410);
