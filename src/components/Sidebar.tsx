@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Armchair, Bed, Shapes, Search, Plus, Pencil, Trash2 } from 'lucide-react';
+import { Armchair, Bed, Shapes, Search, Plus, Pencil, Trash2, X } from 'lucide-react';
 import { FURNITURE_CATALOG } from '../catalog';
 import {
   FurnitureCatalogItem,
@@ -20,6 +20,8 @@ interface SidebarProps {
   setState: React.Dispatch<React.SetStateAction<FloorplanState>>;
   setSelectedId: (id: string | null) => void;
   setSelectedType: (type: SelectedElementType) => void;
+  className?: string;
+  onClose?: () => void;
 }
 
 interface CategoryOption {
@@ -33,6 +35,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   setState,
   setSelectedId,
   setSelectedType,
+  className = '',
+  onClose,
 }) => {
   const [selectedCategory, setSelectedCategory] = useState<FurnitureCategory | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -98,6 +102,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
     setSelectedId(newPlacedItem.id);
     setSelectedType('furniture');
+    if (onClose && typeof window !== 'undefined' && window.innerWidth <= 768) {
+      onClose();
+    }
   };
 
   const openCreator = (item: FurnitureCatalogItem | null = null) => {
@@ -141,10 +148,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
   };
 
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar ${className}`}>
       <div className="sidebar-header">
-        <h2 className="sidebar-title">Furniture Catalog</h2>
-        <span className="sidebar-badge">{filteredItems.length} items</span>
+        <div className="sidebar-header-left">
+          <h2 className="sidebar-title">Furniture Catalog</h2>
+          <span className="sidebar-badge">{filteredItems.length} items</span>
+        </div>
+        {onClose && (
+          <button
+            type="button"
+            className="mobile-close-btn"
+            onClick={onClose}
+            aria-label="Close catalog"
+          >
+            <X size={18} />
+          </button>
+        )}
       </div>
 
       <div className="search-box">

@@ -163,6 +163,87 @@ export const FloorplanCanvas: React.FC<Props> = ({
     };
   }, [zoom]);
 
+  // Touch gestures: Pinch-to-zoom and two-finger pan
+  useEffect(() => {
+    const svgEl = svgRef.current;
+    if (!svgEl) return;
+
+    let touchGesture: {
+      initialDist: number;
+      initialZoom: number;
+      initialPan: { x: number; y: number };
+      initialMidX: number;
+      initialMidY: number;
+    } | null = null;
+
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        e.preventDefault();
+        const t1 = e.touches[0];
+        const t2 = e.touches[1];
+        const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+        const rect = svgEl.getBoundingClientRect();
+        touchGesture = {
+          initialDist: Math.max(dist, 1),
+          initialZoom: zoom,
+          initialPan: { ...pan },
+          initialMidX: (t1.clientX + t2.clientX) / 2 - rect.left,
+          initialMidY: (t1.clientY + t2.clientY) / 2 - rect.top,
+        };
+      } else {
+        touchGesture = null;
+      }
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (e.touches.length === 2 && touchGesture) {
+        e.preventDefault();
+        const t1 = e.touches[0];
+        const t2 = e.touches[1];
+        const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+        const rect = svgEl.getBoundingClientRect();
+        const curMidX = (t1.clientX + t2.clientX) / 2 - rect.left;
+        const curMidY = (t1.clientY + t2.clientY) / 2 - rect.top;
+
+        const scale = dist / touchGesture.initialDist;
+        const newZoom = Math.min(Math.max(touchGesture.initialZoom * scale, 0.2), 4.0);
+
+        const dx = curMidX - touchGesture.initialMidX;
+        const dy = curMidY - touchGesture.initialMidY;
+
+        setZoom(newZoom);
+        setPan({
+          x:
+            touchGesture.initialMidX -
+            ((touchGesture.initialMidX - touchGesture.initialPan.x) / touchGesture.initialZoom) *
+              newZoom +
+            dx,
+          y:
+            touchGesture.initialMidY -
+            ((touchGesture.initialMidY - touchGesture.initialPan.y) / touchGesture.initialZoom) *
+              newZoom +
+            dy,
+        });
+      }
+    };
+
+    const handleTouchEnd = () => {
+      touchGesture = null;
+    };
+
+    svgEl.addEventListener('touchstart', handleTouchStart, { passive: false });
+    svgEl.addEventListener('touchmove', handleTouchMove, { passive: false });
+    svgEl.addEventListener('touchend', handleTouchEnd);
+    svgEl.addEventListener('touchcancel', handleTouchEnd);
+
+    return () => {
+      svgEl.removeEventListener('touchstart', handleTouchStart);
+      svgEl.removeEventListener('touchmove', handleTouchMove);
+      svgEl.removeEventListener('touchend', handleTouchEnd);
+      svgEl.removeEventListener('touchcancel', handleTouchEnd);
+    };
+  }, [zoom, pan]);
+
   const handlePointerDown = (e: React.PointerEvent) => {
     if (e.button === 1 || tool === 'pan' || isSpacePressed) {
       setIsPanning(true);

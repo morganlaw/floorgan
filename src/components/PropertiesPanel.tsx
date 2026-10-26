@@ -100,6 +100,8 @@ interface Props {
   selectedType: SelectedElementType;
   setSelectedType: (type: SelectedElementType) => void;
   setTool?: (tool: ToolMode) => void;
+  className?: string;
+  onClose?: () => void;
 }
 
 export const PropertiesPanel: React.FC<Props> = ({
@@ -112,6 +114,8 @@ export const PropertiesPanel: React.FC<Props> = ({
   selectedType,
   setSelectedType,
   setTool,
+  className = '',
+  onClose,
 }) => {
   const selectedFurniture = state.furniture.find((f) => f.id === selectedId);
   const selectedWall = state.walls.find((w) => w.id === selectedId);
@@ -429,9 +433,19 @@ export const PropertiesPanel: React.FC<Props> = ({
   };
 
   return (
-    <aside className="properties-panel">
+    <aside className={`properties-panel ${className}`}>
       <div className="panel-header">
         <h3 className="panel-title">Inspector</h3>
+        {onClose && (
+          <button
+            type="button"
+            className="mobile-close-btn"
+            onClick={onClose}
+            aria-label="Close inspector"
+          >
+            <X size={18} />
+          </button>
+        )}
       </div>
 
       {isMultiSelect && (

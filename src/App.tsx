@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X } from 'lucide-react';
+import { X, Armchair, SlidersHorizontal, MousePointer, Square, DoorOpen, Hand } from 'lucide-react';
 import { FloorplanState, SelectedElementType, ToolMode } from './types';
 import { TEMPLATES } from './templates';
 import { Toolbar } from './components/Toolbar';
@@ -77,6 +77,7 @@ export const App: React.FC = () => {
   const [pan, setPan] = useState<{ x: number; y: number }>({ x: 140, y: 100 });
   const [showHelp, setShowHelp] = useState<boolean>(false);
   const [showImportModal, setShowImportModal] = useState<boolean>(false);
+  const [mobileDrawer, setMobileDrawer] = useState<'none' | 'catalog' | 'properties'>('none');
 
   useEffect(() => {
     if (!selectedId && selectedIds.length === 0) return;
@@ -161,6 +162,8 @@ export const App: React.FC = () => {
           setState={setState}
           setSelectedId={setSelectedId}
           setSelectedType={setSelectedType}
+          className={mobileDrawer === 'catalog' ? 'mobile-open' : ''}
+          onClose={() => setMobileDrawer('none')}
         />
 
         <FloorplanCanvas
@@ -192,8 +195,100 @@ export const App: React.FC = () => {
           selectedType={selectedType}
           setSelectedType={setSelectedType}
           setTool={setTool}
+          className={mobileDrawer === 'properties' ? 'mobile-open' : ''}
+          onClose={() => setMobileDrawer('none')}
         />
       </div>
+
+      {mobileDrawer !== 'none' && (
+        <div
+          className="mobile-drawer-backdrop"
+          onClick={() => setMobileDrawer('none')}
+          aria-hidden="true"
+        />
+      )}
+
+      <nav className="mobile-bottom-bar" aria-label="Mobile Navigation">
+        <button
+          type="button"
+          className={`mobile-nav-btn ${mobileDrawer === 'catalog' ? 'active' : ''}`}
+          onClick={() =>
+            setMobileDrawer((curr) => (curr === 'catalog' ? 'none' : 'catalog'))
+          }
+        >
+          <Armchair size={18} />
+          <span>Catalog</span>
+        </button>
+
+        <div className="mobile-quick-tools">
+          <button
+            type="button"
+            className={`mobile-tool-badge ${tool === 'select' ? 'active' : ''}`}
+            onClick={() => {
+              setTool('select');
+              setMobileDrawer('none');
+            }}
+            title="Select"
+          >
+            <MousePointer size={15} />
+            <span>Select</span>
+          </button>
+          <button
+            type="button"
+            className={`mobile-tool-badge ${tool === 'wall' ? 'active' : ''}`}
+            onClick={() => {
+              setTool('wall');
+              setMobileDrawer('none');
+            }}
+            title="Wall"
+          >
+            <Square size={15} />
+            <span>Wall</span>
+          </button>
+          <button
+            type="button"
+            className={`mobile-tool-badge ${tool === 'door' ? 'active' : ''}`}
+            onClick={() => {
+              setTool('door');
+              setMobileDrawer('none');
+            }}
+            title="Door"
+          >
+            <DoorOpen size={15} />
+            <span>Door</span>
+          </button>
+          <button
+            type="button"
+            className={`mobile-tool-badge ${tool === 'pan' ? 'active' : ''}`}
+            onClick={() => {
+              setTool('pan');
+              setMobileDrawer('none');
+            }}
+            title="Pan"
+          >
+            <Hand size={15} />
+            <span>Pan</span>
+          </button>
+        </div>
+
+        <button
+          type="button"
+          className={`mobile-nav-btn ${mobileDrawer === 'properties' ? 'active' : ''} ${
+            selectedId || selectedIds.length > 0 ? 'has-selection' : ''
+          }`}
+          onClick={() =>
+            setMobileDrawer((curr) => (curr === 'properties' ? 'none' : 'properties'))
+          }
+        >
+          <div className="relative-icon-wrap">
+            <SlidersHorizontal size={18} />
+            {(selectedId || selectedIds.length > 0) && (
+              <span className="mobile-nav-indicator-dot" />
+            )}
+          </div>
+          <span>{selectedId || selectedIds.length > 0 ? 'Edit' : 'Inspector'}</span>
+        </button>
+      </nav>
 
       <ImportModal
         isOpen={showImportModal}
