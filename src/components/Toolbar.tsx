@@ -15,9 +15,9 @@ import {
   Type,
   HelpCircle,
   Upload,
+  Trash2,
 } from 'lucide-react';
 import { FloorplanState, SelectedElementType, ToolMode, Unit } from '../types';
-import { TEMPLATES } from '../templates';
 
 interface ToolbarProps {
   tool: ToolMode;
@@ -28,6 +28,7 @@ interface ToolbarProps {
   setZoom: React.Dispatch<React.SetStateAction<number>>;
   setPan: React.Dispatch<React.SetStateAction<{ x: number; y: number }>>;
   setSelectedId: (id: string | null) => void;
+  setSelectedIds?: (ids: string[]) => void;
   setSelectedType: (type: SelectedElementType) => void;
   onOpenImportModal: () => void;
   onOpenShortcuts?: () => void;
@@ -45,6 +46,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   setZoom,
   setPan,
   setSelectedId,
+  setSelectedIds,
   setSelectedType,
   onOpenImportModal,
   onOpenShortcuts,
@@ -76,34 +78,34 @@ export const Toolbar: React.FC<ToolbarProps> = ({
     setState((prev) => ({ ...prev, gridSnap: !prev.gridSnap }));
   };
 
-  const handleTemplateLoad = (key: string) => {
-    if (key === 'clear') {
-      if (window.confirm('Clear current floorplan?')) {
-        setState({
-          walls: [],
-          doors: [],
-          windows: [],
-          furniture: [],
-          measurements: [],
-          textBoxes: [],
-          roomLabels: [],
-          background: null,
-          unit: 'm',
-          gridSnap: true,
-          gridSize: 20,
-        });
-        setSelectedId(null);
-        setSelectedType(null);
-      }
-      return;
-    }
+  const isCanvasEmpty =
+    state.walls.length === 0 &&
+    state.doors.length === 0 &&
+    state.windows.length === 0 &&
+    state.furniture.length === 0 &&
+    state.measurements.length === 0 &&
+    (!state.textBoxes || state.textBoxes.length === 0) &&
+    (!state.roomLabels || state.roomLabels.length === 0) &&
+    !state.background;
 
-    if (TEMPLATES[key]) {
-      setState(TEMPLATES[key].state);
+  const handleClearCanvas = () => {
+    if (isCanvasEmpty) return;
+
+    if (window.confirm('Clear canvas? All walls, furniture, and measurements will be removed.')) {
+      setState((prev) => ({
+        ...prev,
+        walls: [],
+        doors: [],
+        windows: [],
+        furniture: [],
+        measurements: [],
+        textBoxes: [],
+        roomLabels: [],
+        background: null,
+      }));
       setSelectedId(null);
+      setSelectedIds?.([]);
       setSelectedType(null);
-      setZoom(1.0);
-      setPan({ x: 200, y: 150 });
     }
   };
 
@@ -287,22 +289,16 @@ export const Toolbar: React.FC<ToolbarProps> = ({
       </div>
 
       <div className="tool-group-right">
-        <select
-          className="select-dropdown select-dropdown-sm"
-          onChange={(e) => {
-            handleTemplateLoad(e.target.value);
-            e.target.value = '';
-          }}
-          defaultValue=""
-          title="Load starter template"
+        <button
+          type="button"
+          className="tool-btn-icon danger"
+          onClick={handleClearCanvas}
+          disabled={isCanvasEmpty}
+          title={isCanvasEmpty ? 'Canvas is empty' : 'Clear Canvas'}
+          aria-label="Clear Canvas"
         >
-          <option value="" disabled>
-            Template...
-          </option>
-          <option value="studio">Studio Apt</option>
-          <option value="one_bedroom">1-Bed Flat</option>
-          <option value="clear">Clear Canvas</option>
-        </select>
+          <Trash2 size={16} />
+        </button>
 
         {onOpenShortcuts && (
           <button

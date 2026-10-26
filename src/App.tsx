@@ -147,6 +147,7 @@ export const App: React.FC = () => {
         setZoom={setZoom}
         setPan={setPan}
         setSelectedId={setSelectedId}
+        setSelectedIds={setSelectedIds}
         setSelectedType={setSelectedType}
         onOpenImportModal={() => setShowImportModal(true)}
         onOpenShortcuts={() => setShowHelp(true)}
