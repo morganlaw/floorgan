@@ -12,6 +12,7 @@ import {
 } from '../types';
 import {
   snapPointToGrid,
+  snapToWallFaces,
   distance,
   snapAngle,
   formatDimension,
@@ -113,7 +114,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
 
   const [resizeTarget, setResizeTarget] = useState<{
     id: string;
-    type: 'door' | 'window' | 'furniture' | 'textbox' | 'wall';
+    type: 'door' | 'window' | 'furniture' | 'textbox' | 'wall' | 'measurement';
     handle: 'left' | 'right' | 'top' | 'bottom' | 'nw' | 'ne' | 'se' | 'sw' | 'start' | 'end';
   } | null>(null);
 
@@ -177,25 +178,39 @@ export const FloorplanCanvas: React.FC<Props> = ({
     } | null = null;
 
     const handleTouchStart = (e: TouchEvent) => {
-      if (e.touches.length === 2) {
+      if (e.touches.length >= 2) {
         e.preventDefault();
-        const t1 = e.touches[0];
-        const t2 = e.touches[1];
-        const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
-        const rect = svgEl.getBoundingClientRect();
-        touchGesture = {
-          initialDist: Math.max(dist, 1),
-          initialZoom: zoom,
-          initialPan: { ...pan },
-          initialMidX: (t1.clientX + t2.clientX) / 2 - rect.left,
-          initialMidY: (t1.clientY + t2.clientY) / 2 - rect.top,
-        };
+        setWallStart(null);
+        setMeasureStart(null);
+        setCalibStart(null);
+        setSelectionBox(null);
+        setIsPanning(false);
+        setIsDragging(false);
+        setResizeTarget(null);
+        if (e.touches.length === 2) {
+          const t1 = e.touches[0];
+          const t2 = e.touches[1];
+          const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+          const rect = svgEl.getBoundingClientRect();
+          touchGesture = {
+            initialDist: Math.max(dist, 1),
+            initialZoom: zoom,
+            initialPan: { ...pan },
+            initialMidX: (t1.clientX + t2.clientX) / 2 - rect.left,
+            initialMidY: (t1.clientY + t2.clientY) / 2 - rect.top,
+          };
+        } else {
+          touchGesture = null;
+        }
       } else {
         touchGesture = null;
       }
     };
 
     const handleTouchMove = (e: TouchEvent) => {
+      if (e.touches.length >= 2) {
+        e.preventDefault();
+      }
       if (e.touches.length === 2 && touchGesture) {
         e.preventDefault();
         const t1 = e.touches[0];
@@ -332,11 +347,13 @@ export const FloorplanCanvas: React.FC<Props> = ({
         }
       }
     } else if (tool === 'measure') {
+      const wallSnapped = snapToWallFaces(worldPoint, state.walls, 14);
+      const effectiveSnapped = wallSnapped !== worldPoint ? wallSnapped : snappedPoint;
       if (!measureStart) {
-        setMeasureStart(snappedPoint);
-        setMeasureEnd(snappedPoint);
+        setMeasureStart(effectiveSnapped);
+        setMeasureEnd(effectiveSnapped);
       } else {
-        const finalEnd = e.shiftKey ? snapAngle(measureStart, snappedPoint) : snappedPoint;
+        const finalEnd = e.shiftKey ? snapAngle(measureStart, effectiveSnapped) : effectiveSnapped;
         if (distance(measureStart, finalEnd) > 5) {
           const newMeasurement: Measurement = {
             id: 'measure_' + Date.now(),
@@ -434,7 +451,10 @@ export const FloorplanCanvas: React.FC<Props> = ({
     }
 
     if (tool === 'measure' && measureStart) {
-      setMeasureEnd(snappedPoint);
+      const wallSnapped = snapToWallFaces(worldPoint, state.walls, 14);
+      const effectiveSnapped = wallSnapped !== worldPoint ? wallSnapped : snappedPoint;
+      const finalEnd = e.shiftKey ? snapAngle(measureStart, effectiveSnapped) : effectiveSnapped;
+      setMeasureEnd(finalEnd);
     }
 
     if (tool === 'calibrate' && calibStart) {
@@ -659,6 +679,37 @@ export const FloorplanCanvas: React.FC<Props> = ({
             }
           }
         }
+      } else if (resizeTarget.type === 'measurement') {
+        const m = state.measurements.find((meas) => meas.id === selectedId);
+        if (m) {
+          const wallSnapped = snapToWallFaces(worldPoint, state.walls, 14);
+          const effectiveSnapped = wallSnapped !== worldPoint ? wallSnapped : snappedPoint;
+          if (resizeTarget.handle === 'start') {
+            const finalStart = e.shiftKey
+              ? snapAngle(m.end, effectiveSnapped, state.gridSize, state.gridSnap)
+              : effectiveSnapped;
+            if (distance(finalStart, m.end) >= 5) {
+              setState((prev) => ({
+                ...prev,
+                measurements: prev.measurements.map((meas) =>
+                  meas.id === selectedId ? { ...meas, start: finalStart } : meas
+                ),
+              }));
+            }
+          } else if (resizeTarget.handle === 'end') {
+            const finalEnd = e.shiftKey
+              ? snapAngle(m.start, effectiveSnapped, state.gridSize, state.gridSnap)
+              : effectiveSnapped;
+            if (distance(m.start, finalEnd) >= 5) {
+              setState((prev) => ({
+                ...prev,
+                measurements: prev.measurements.map((meas) =>
+                  meas.id === selectedId ? { ...meas, end: finalEnd } : meas
+                ),
+              }));
+            }
+          }
+        }
       }
     }
 
@@ -703,6 +754,18 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   },
                 }
               : wl
+          ),
+          measurements: prev.measurements.map((m) =>
+            dragInitialPositions[m.id]
+              ? {
+                  ...m,
+                  start: { x: dragInitialPositions[m.id].x + dx, y: dragInitialPositions[m.id].y + dy },
+                  end: {
+                    x: (dragInitialPositions[m.id].endX ?? m.end.x) + dx,
+                    y: (dragInitialPositions[m.id].endY ?? m.end.y) + dy,
+                  },
+                }
+              : m
           ),
         }));
       } else if (selectedId) {
@@ -812,6 +875,41 @@ export const FloorplanCanvas: React.FC<Props> = ({
                       end: { x: newEndX, y: newEndY },
                     }
                   : w
+              ),
+            }));
+          }
+        } else if (selectedType === 'measurement') {
+          const m = state.measurements.find((meas) => meas.id === selectedId);
+          if (m) {
+            const halfDx = (m.end.x - m.start.x) / 2;
+            const halfDy = (m.end.y - m.start.y) / 2;
+            const targetMidX = worldPoint.x - dragOffset.x;
+            const targetMidY = worldPoint.y - dragOffset.y;
+
+            let newStartX = targetMidX - halfDx;
+            let newStartY = targetMidY - halfDy;
+
+            if (state.gridSnap) {
+              newStartX = Math.round(newStartX / state.gridSize) * state.gridSize;
+              newStartY = Math.round(newStartY / state.gridSize) * state.gridSize;
+            } else {
+              newStartX = Math.round(newStartX);
+              newStartY = Math.round(newStartY);
+            }
+
+            const newEndX = newStartX + (m.end.x - m.start.x);
+            const newEndY = newStartY + (m.end.y - m.start.y);
+
+            setState((prev) => ({
+              ...prev,
+              measurements: prev.measurements.map((meas) =>
+                meas.id === selectedId
+                  ? {
+                      ...meas,
+                      start: { x: newStartX, y: newStartY },
+                      end: { x: newEndX, y: newEndY },
+                    }
+                  : meas
               ),
             }));
           }
@@ -1258,6 +1356,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
       for (const d of state.doors) if (activeIds.includes(d.id)) initPos[d.id] = { x: d.x, y: d.y };
       for (const w of state.windows) if (activeIds.includes(w.id)) initPos[w.id] = { x: w.x, y: w.y };
       for (const wl of state.walls) if (activeIds.includes(wl.id)) initPos[wl.id] = { x: wl.start.x, y: wl.start.y, endX: wl.end.x, endY: wl.end.y };
+      for (const m of state.measurements) if (activeIds.includes(m.id)) initPos[m.id] = { x: m.start.x, y: m.start.y, endX: m.end.x, endY: m.end.y };
       setDragInitialPositions(initPos);
       setDragStartPoint(worldPoint);
     } else {
@@ -2731,7 +2830,18 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   e.stopPropagation();
                   toggleOrSelectItem(m.id, 'measurement', e.shiftKey);
                 }}
-                className="cursor-pointer"
+                onPointerDown={(e) => {
+                  if (tool === 'select') {
+                    e.stopPropagation();
+                    if (e.shiftKey) {
+                      toggleOrSelectItem(m.id, 'measurement', true);
+                      return;
+                    }
+                    const worldPoint = screenToWorld(e.clientX, e.clientY);
+                    startDragForIds(m.id, 'measurement', worldPoint, { x: midX, y: midY });
+                  }
+                }}
+                className={tool === 'select' ? 'cursor-move' : 'cursor-pointer'}
               >
                 <line
                   x1={m.start.x}
@@ -2739,7 +2849,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   x2={m.end.x}
                   y2={m.end.y}
                   stroke="transparent"
-                  strokeWidth="20"
+                  strokeWidth="24"
                 />
                 <line
                   x1={m.start.x}
@@ -2753,18 +2863,38 @@ export const FloorplanCanvas: React.FC<Props> = ({
                 <circle
                   cx={m.start.x}
                   cy={m.start.y}
-                  r={isSelected ? '6' : '4.5'}
+                  r={isSelected ? '8' : '5'}
                   fill={isSelected ? '#2563eb' : '#e11d48'}
                   stroke="#ffffff"
-                  strokeWidth="1.5"
+                  strokeWidth={isSelected ? '2.5' : '1.5'}
+                  className={isSelected ? 'cursor-crosshair active:scale-125 transition-transform' : ''}
+                  onPointerDown={(e) => {
+                    if (tool === 'select') {
+                      e.stopPropagation();
+                      onStartInteraction?.();
+                      setSelectedId(m.id);
+                      setSelectedType('measurement');
+                      setResizeTarget({ id: m.id, type: 'measurement', handle: 'start' });
+                    }
+                  }}
                 />
                 <circle
                   cx={m.end.x}
                   cy={m.end.y}
-                  r={isSelected ? '6' : '4.5'}
+                  r={isSelected ? '8' : '5'}
                   fill={isSelected ? '#2563eb' : '#e11d48'}
                   stroke="#ffffff"
-                  strokeWidth="1.5"
+                  strokeWidth={isSelected ? '2.5' : '1.5'}
+                  className={isSelected ? 'cursor-crosshair active:scale-125 transition-transform' : ''}
+                  onPointerDown={(e) => {
+                    if (tool === 'select') {
+                      e.stopPropagation();
+                      onStartInteraction?.();
+                      setSelectedId(m.id);
+                      setSelectedType('measurement');
+                      setResizeTarget({ id: m.id, type: 'measurement', handle: 'end' });
+                    }
+                  }}
                 />
                 <g transform={`translate(${midX}, ${midY})`}>
                   <rect

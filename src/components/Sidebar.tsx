@@ -102,7 +102,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
     setSelectedId(newPlacedItem.id);
     setSelectedType('furniture');
-    if (onClose && typeof window !== 'undefined' && window.innerWidth <= 768) {
+    if (onClose && typeof window !== 'undefined' && window.innerWidth <= 860) {
       onClose();
     }
   };

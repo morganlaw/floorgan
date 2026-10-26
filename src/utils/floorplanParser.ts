@@ -1524,7 +1524,11 @@ export function parseDimensionText(
 function matchDimensionsToPixelWalls(
   candidates: RawDimensionCandidate[],
   rawSegmentsPx: RawSegment[],
-  spanPxW: number
+  spanPxW: number,
+  wallMask?: Uint8Array | null,
+  maskWidth?: number,
+  maskHeight?: number,
+  ocrTextBoxes: OcrTextBoxPx[] = []
 ): {
   matched: DetectedDimension[];
   calibratedWidthMeters: number | null;
@@ -1543,6 +1547,81 @@ function matchDimensionsToPixelWalls(
       cmPerPxY: null,
     };
   }
+
+  const isInTextBox = (x: number, y: number): boolean => {
+    for (const b of ocrTextBoxes) {
+      if (x >= b.x0 - 2 && x <= b.x1 + 2 && y >= b.y0 - 2 && y <= b.y1 + 2) return true;
+    }
+    return false;
+  };
+
+  const findInnerFacesViaRays = (
+    cx: number,
+    cy: number,
+    bMinX: number,
+    bMaxX: number,
+    bMinY: number,
+    bMaxY: number
+  ) => {
+    if (!wallMask || !maskWidth || !maskHeight) return null;
+    const leftHits: number[] = [];
+    const rightHits: number[] = [];
+    const topHits: number[] = [];
+    const bottomHits: number[] = [];
+
+    const ySteps = 9;
+    for (let i = 1; i < ySteps; i++) {
+      const y = Math.round(bMinY + (bMaxY - bMinY) * (i / ySteps));
+      if (y < 0 || y >= maskHeight) continue;
+      for (let x = Math.min(cx, maskWidth - 1); x >= Math.max(0, bMinX - 14); x--) {
+        if (isInTextBox(x, y)) continue;
+        if (wallMask[y * maskWidth + x] === 1) {
+          leftHits.push(x + 1);
+          break;
+        }
+      }
+      for (let x = Math.max(cx, 0); x <= Math.min(maskWidth - 1, bMaxX + 14); x++) {
+        if (isInTextBox(x, y)) continue;
+        if (wallMask[y * maskWidth + x] === 1) {
+          rightHits.push(x);
+          break;
+        }
+      }
+    }
+
+    const xSteps = 9;
+    for (let i = 1; i < xSteps; i++) {
+      const x = Math.round(bMinX + (bMaxX - bMinX) * (i / xSteps));
+      if (x < 0 || x >= maskWidth) continue;
+      for (let y = Math.min(cy, maskHeight - 1); y >= Math.max(0, bMinY - 14); y--) {
+        if (isInTextBox(x, y)) continue;
+        if (wallMask[y * maskWidth + x] === 1) {
+          topHits.push(y + 1);
+          break;
+        }
+      }
+      for (let y = Math.max(cy, 0); y <= Math.min(maskHeight - 1, bMaxY + 14); y++) {
+        if (isInTextBox(x, y)) continue;
+        if (wallMask[y * maskWidth + x] === 1) {
+          bottomHits.push(y);
+          break;
+        }
+      }
+    }
+
+    const median = (arr: number[]) => {
+      if (arr.length === 0) return null;
+      arr.sort((a, b) => a - b);
+      return arr[Math.floor(arr.length / 2)];
+    };
+
+    return {
+      rayLeft: median(leftHits),
+      rayRight: median(rightHits),
+      rayTop: median(topHits),
+      rayBottom: median(bottomHits),
+    };
+  };
 
   const maxRayBridgeGapPx = Math.max(110, Math.round(spanPxW * 0.22));
   const bridgeWallGapsForRays = (segs: RawSegment[]): RawSegment[] => {
@@ -1601,9 +1680,28 @@ function matchDimensionsToPixelWalls(
 
       const crossMarginPx = 12;
 
+      let leftWall: RawSegment | null = null;
+      let rightWall: RawSegment | null = null;
+
+      for (const vw of vWalls) {
+        if (vw.end - vw.start < 16) continue;
+        if (cyPx >= vw.start - crossMarginPx && cyPx <= vw.end + crossMarginPx) {
+          if (vw.pos < cxPx && (!leftWall || vw.pos > leftWall.pos)) {
+            leftWall = vw;
+          }
+          if (vw.pos > cxPx && (!rightWall || vw.pos < rightWall.pos)) {
+            rightWall = vw;
+          }
+        }
+      }
+
       for (const hw of hWalls) {
         if (hw.end - hw.start < 16) continue;
-        if (cxPx >= hw.start - crossMarginPx && cxPx <= hw.end + crossMarginPx) {
+        const inXRange =
+          leftWall && rightWall
+            ? Math.min(hw.end, rightWall.pos) - Math.max(hw.start, leftWall.pos) >= 16
+            : cxPx >= hw.start - crossMarginPx && cxPx <= hw.end + crossMarginPx;
+        if (inXRange) {
           if (hw.pos < cyPx && (!topWall || hw.pos > topWall.pos)) {
             topWall = hw;
           }
@@ -1615,9 +1713,6 @@ function matchDimensionsToPixelWalls(
 
       const roomTop = topWall ? topWall.pos : cyPx - 60;
       const roomBottom = bottomWall ? bottomWall.pos : cyPx + 60;
-
-      let leftWall: RawSegment | null = null;
-      let rightWall: RawSegment | null = null;
 
       for (const vw of vWalls) {
         const crossesCy =
@@ -1657,23 +1752,53 @@ function matchDimensionsToPixelWalls(
         }
       }
 
-      // Room dimension labels denote the interior clear span (face-to-face),
-      // not the wall centerline distance, so subtract half of each bounding
-      // wall's thickness. When a side was inferred from wall endpoints (no
-      // explicit perpendicular wall), fall back to the opposite axis' average.
+      // Room dimension labels denote the interior clear span (open area face-to-face),
+      // completely excluding shaded black walls.
       const hThickAvg =
         topWall && bottomWall ? (topWall.thickness + bottomWall.thickness) / 2 : 0;
       const vThickAvg =
         leftWall && rightWall ? (leftWall.thickness + rightWall.thickness) / 2 : hThickAvg;
-      const leftHalfT = (leftWall ? leftWall.thickness : vThickAvg || hThickAvg) / 2;
-      const rightHalfT = (rightWall ? rightWall.thickness : vThickAvg || hThickAvg) / 2;
-      const topHalfT = topWall ? topWall.thickness / 2 : 0;
-      const bottomHalfT = bottomWall ? bottomWall.thickness / 2 : 0;
+
+      const innerLeft =
+        leftWall !== null
+          ? leftWall.pos + leftWall.thickness / 2
+          : leftX !== null
+            ? leftX + (vThickAvg || hThickAvg)
+            : null;
+      const innerRight =
+        rightWall !== null
+          ? rightWall.pos - rightWall.thickness / 2
+          : rightX !== null
+            ? rightX - (vThickAvg || hThickAvg)
+            : null;
+      const innerTop =
+        topWall !== null ? topWall.pos + topWall.thickness / 2 : null;
+      const innerBottom =
+        bottomWall !== null ? bottomWall.pos - bottomWall.thickness / 2 : null;
+
+      const approxMinX = leftX ?? cxPx - 100;
+      const approxMaxX = rightX ?? cxPx + 100;
+      const approxMinY = topWall ? topWall.pos : cyPx - 100;
+      const approxMaxY = bottomWall ? bottomWall.pos : cyPx + 100;
+
+      const rayFaces = findInnerFacesViaRays(
+        cxPx,
+        cyPx,
+        approxMinX,
+        approxMaxX,
+        approxMinY,
+        approxMaxY
+      );
+
+      const finalInnerLeft = rayFaces?.rayLeft ?? innerLeft;
+      const finalInnerRight = rayFaces?.rayRight ?? innerRight;
+      const finalInnerTop = rayFaces?.rayTop ?? innerTop;
+      const finalInnerBottom = rayFaces?.rayBottom ?? innerBottom;
 
       const roomW =
-        leftX !== null && rightX !== null ? rightX - leftX - leftHalfT - rightHalfT : 0;
+        finalInnerLeft !== null && finalInnerRight !== null ? Math.max(0, finalInnerRight - finalInnerLeft) : 0;
       const roomH =
-        topWall && bottomWall ? bottomWall.pos - topWall.pos - topHalfT - bottomHalfT : 0;
+        finalInnerTop !== null && finalInnerBottom !== null ? Math.max(0, finalInnerBottom - finalInnerTop) : 0;
 
       if (roomW > 30 && roomH > 30) {
         const directRatioX = cand.val1Cm / roomW;
@@ -1693,10 +1818,10 @@ function matchDimensionsToPixelWalls(
         const avgScale = (scaleX + scaleY) / 2;
 
         const spanBox = {
-          x1: leftX!,
-          y1: topWall!.pos,
-          x2: rightX!,
-          y2: bottomWall!.pos,
+          x1: finalInnerLeft!,
+          y1: finalInnerTop!,
+          x2: finalInnerRight!,
+          y2: finalInnerBottom!,
         };
 
         if (bestDiff < 0.25 && avgScale >= 0.2 && avgScale <= 15) {
@@ -1761,7 +1886,7 @@ function matchDimensionsToPixelWalls(
       if (bestWall) {
         const rawLenPx = bestWall.end - bestWall.start;
         const lenPx =
-          rawLenPx > bestWall.thickness * 4 ? rawLenPx - bestWall.thickness : rawLenPx;
+          rawLenPx > bestWall.thickness * 4 ? rawLenPx - bestWall.thickness * 2 : rawLenPx;
         const scale = cand.val1Cm / lenPx;
         if (scale >= 0.2 && scale <= 15) {
           verifiedRooms.push({
@@ -1803,7 +1928,7 @@ function matchDimensionsToPixelWalls(
     let sumScaleX = 0;
     let sumScaleY = 0;
     for (const r of activeRooms) {
-      const w = (r.areaPx * r.areaPx) / (0.005 + r.diff * r.diff);
+      const w = r.areaPx / (0.005 + r.diff * r.diff);
       sumW += w;
       sumScale += r.scale * w;
       sumScaleX += r.scaleX * w;
@@ -1813,7 +1938,7 @@ function matchDimensionsToPixelWalls(
     cmPerPxX = sumScaleX / sumW;
     cmPerPxY = sumScaleY / sumW;
 
-    if (Math.abs(cmPerPxX - cmPerPxY) / medianCmPerPx > 0.12) {
+    if (Math.abs(cmPerPxX - cmPerPxY) / medianCmPerPx > 0.15) {
       cmPerPxX = medianCmPerPx;
       cmPerPxY = medianCmPerPx;
     }
@@ -2711,7 +2836,7 @@ export function regularizeFloorplanGraph(
         pos: Math.round(m.posWeight / m.totalLen),
         start: m.start,
         end: m.end,
-        thickness: Math.min(25, Math.max(12, Math.round(m.thickWeight / m.totalLen / 5) * 5)),
+        thickness: Math.min(30, Math.max(8, Math.round(m.thickWeight / m.totalLen))),
       }));
     }
 
@@ -2725,10 +2850,10 @@ export function regularizeFloorplanGraph(
         (prev.posWeight + curr.posWeight) / (prev.totalLen + curr.totalLen)
       );
       const combinedThick = Math.min(
-        25,
+        30,
         Math.max(
-          12,
-          Math.round(((prev.thickWeight + curr.thickWeight) / (prev.totalLen + curr.totalLen)) / 5) * 5
+          8,
+          Math.round((prev.thickWeight + curr.thickWeight) / (prev.totalLen + curr.totalLen))
         )
       );
 
@@ -2779,7 +2904,7 @@ export function regularizeFloorplanGraph(
 
     return bridged.map((m) => {
       const finalPos = Math.round(m.posWeight / m.totalLen);
-      const finalThick = Math.min(25, Math.max(12, Math.round(m.thickWeight / m.totalLen / 5) * 5));
+      const finalThick = Math.min(30, Math.max(8, Math.round(m.thickWeight / m.totalLen)));
       return {
         axis,
         pos: finalPos,
@@ -4196,7 +4321,11 @@ export function parseFloorplanRgbaBuffer(
   const ocrMatch = matchDimensionsToPixelWalls(
     ocrCandidates,
     [...rawSegmentsPx, ...winBandsPx],
-    spanPxW
+    spanPxW,
+    masks.rawMask || masks.structuralMask,
+    w,
+    h,
+    ocrTextBoxes
   );
 
   let doorCalibratedCmPerPx: number | null = null;
@@ -4295,8 +4424,8 @@ export function parseFloorplanRgbaBuffer(
     start: s.start * (s.axis === 'h' ? cmPerPxX : cmPerPxY),
     end: s.end * (s.axis === 'h' ? cmPerPxX : cmPerPxY),
     thickness: Math.max(
-      10,
-      Math.min(25, Math.round(s.thickness * (s.axis === 'h' ? cmPerPxY : cmPerPxX)))
+      8,
+      Math.min(30, Math.round(s.thickness * (s.axis === 'h' ? cmPerPxY : cmPerPxX)))
     ),
   }));
 
