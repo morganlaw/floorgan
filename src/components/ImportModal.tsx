@@ -69,6 +69,12 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   const [keepExistingFurniture, setKeepExistingFurniture] = useState<boolean>(false);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const mlRunningRef = useRef<boolean>(false);
+  const loadedImageElRef = useRef<HTMLImageElement | null>(null);
+
+  useEffect(() => {
+    loadedImageElRef.current = loadedImageEl;
+  }, [loadedImageEl]);
 
   const handleFileSelect = (file: File) => {
     setUrlError(null);
@@ -153,14 +159,29 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     };
   }, [loadedImageEl, options.invert]);
 
+  // Invalidate ML masks when a new image is loaded or inverted
+  useEffect(() => {
+    setMlMasks(null);
+    mlRunningRef.current = false;
+  }, [loadedImageEl, options.invert]);
+
   useEffect(() => {
     if (!loadedImageEl || parserEngine !== 'ml') {
-      setMlMasks(null);
       setIsRunningMl(false);
       return;
     }
 
-    let cancelled = false;
+    if (mlMasks) {
+      setIsRunningMl(false);
+      return;
+    }
+
+    if (mlRunningRef.current) {
+      setIsRunningMl(true);
+      return;
+    }
+
+    mlRunningRef.current = true;
     setIsRunningMl(true);
 
     const naturalW = loadedImageEl.naturalWidth || loadedImageEl.width || 600;
@@ -177,27 +198,24 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     ctx.fillRect(0, 0, w, h);
     ctx.drawImage(loadedImageEl, 0, 0, w, h);
     const imgData = ctx.getImageData(0, 0, w, h);
+    const targetImg = loadedImageEl;
 
     segmentFloorplanMlBrowser(imgData.data, w, h, options, ocrTextBoxes)
       .then((masks) => {
-        if (!cancelled) {
+        if (loadedImageElRef.current === targetImg) {
           setMlMasks(masks);
         }
       })
       .catch((err) => {
         console.warn('Segmentation fallback to Otsu:', err);
-        if (!cancelled) {
-          setMlMasks(null);
-        }
       })
       .finally(() => {
-        if (!cancelled) setIsRunningMl(false);
+        mlRunningRef.current = false;
+        if (loadedImageElRef.current === targetImg) {
+          setIsRunningMl(false);
+        }
       });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [loadedImageEl, parserEngine]);
+  }, [loadedImageEl, parserEngine, mlMasks, options.invert]);
 
   useEffect(() => {
     if (!loadedImageEl) return;
@@ -340,7 +358,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                 >
                   <FileImage size={24} className="text-blue-600" />
                   <span className="dropzone-title">
-                    Click to upload, drag & drop, or press <kbd>Ctrl+V</kbd>
+                    Click to upload or drag and drop
                   </span>
                   <span className="dropzone-sub">PNG, JPG, WEBP, or SVG floorplan</span>
                   <input
@@ -420,7 +438,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                 <div className="field-group mb-2">
                   <div className="flex justify-between items-center mb-1">
                     <label className="field-label">Parser Engine</label>
-                    {isRunningMl && (
+                    {isRunningMl && parserEngine === 'ml' && (
                       <span className="text-xs text-blue-600 flex items-center gap-1">
                         <Loader2 size={12} className="spin" />
                         Segmenting floorplan...

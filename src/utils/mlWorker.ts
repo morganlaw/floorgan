@@ -123,67 +123,75 @@ async function releaseSession(): Promise<void> {
   }
 }
 
-self.onmessage = async (e: MessageEvent) => {
+let executionQueue: Promise<void> = Promise.resolve();
+
+self.onmessage = (e: MessageEvent) => {
   const { id, type, payload } = e.data;
 
-  try {
-    if (type === 'WARM') {
-      await getOrInitSession(payload?.modelUrl);
-      self.postMessage({ id, type: 'WARMED' });
-    } else if (type === 'RELEASE') {
-      await releaseSession();
-      self.postMessage({ id, type: 'RELEASED' });
-    } else if (type === 'SEGMENT') {
-      const { rgba, w, h, options, ocrTextBoxes, modelUrl } = payload as {
-        rgba: Uint8Array;
-        w: number;
-        h: number;
-        options: ParseOptions;
-        ocrTextBoxes: OcrTextBoxPx[];
-        modelUrl?: string;
-      };
+  executionQueue = executionQueue
+    .then(async () => {
+      try {
+        if (type === 'WARM') {
+          await getOrInitSession(payload?.modelUrl);
+          self.postMessage({ id, type: 'WARMED' });
+        } else if (type === 'RELEASE') {
+          await releaseSession();
+          self.postMessage({ id, type: 'RELEASED' });
+        } else if (type === 'SEGMENT') {
+          const { rgba, w, h, options, ocrTextBoxes, modelUrl } = payload as {
+            rgba: Uint8Array;
+            w: number;
+            h: number;
+            options: ParseOptions;
+            ocrTextBoxes: OcrTextBoxPx[];
+            modelUrl?: string;
+          };
 
-      const session = await getOrInitSession(modelUrl);
-      const inputData = prepareModelInputTensor(rgba, w, h, ML_MODEL_INPUT_SIZE);
-      const inputTensor = new ort.Tensor('float32', inputData, [
-        1,
-        3,
-        ML_MODEL_INPUT_SIZE,
-        ML_MODEL_INPUT_SIZE,
-      ]);
+          const session = await getOrInitSession(modelUrl);
+          const inputData = prepareModelInputTensor(rgba, w, h, ML_MODEL_INPUT_SIZE);
+          const inputTensor = new ort.Tensor('float32', inputData, [
+            1,
+            3,
+            ML_MODEL_INPUT_SIZE,
+            ML_MODEL_INPUT_SIZE,
+          ]);
 
-      const outputs = await session.run({ input_rgb: inputTensor });
-      const logitsTensor = outputs.logits ?? Object.values(outputs)[0];
-      const logitsData = logitsTensor.data as Float32Array;
+          const outputs = await session.run({ input_rgb: inputTensor });
+          const logitsTensor = outputs.logits ?? Object.values(outputs)[0];
+          const logitsData = logitsTensor.data as Float32Array;
 
-      const masks = logitsToSegmentationMasks(
-        logitsData,
-        rgba,
-        w,
-        h,
-        options,
-        ocrTextBoxes,
-        ML_MODEL_INPUT_SIZE
-      );
+          const masks = logitsToSegmentationMasks(
+            logitsData,
+            rgba,
+            w,
+            h,
+            options,
+            ocrTextBoxes,
+            ML_MODEL_INPUT_SIZE
+          );
 
-      const transferables: Transferable[] = [
-        masks.structuralMask.buffer,
-        masks.rawMask.buffer,
-        masks.detailMask.buffer,
-      ];
-      if (masks.doorMask) transferables.push(masks.doorMask.buffer);
-      if (masks.windowMask) transferables.push(masks.windowMask.buffer);
+          const transferables: Transferable[] = [
+            masks.structuralMask.buffer,
+            masks.rawMask.buffer,
+            masks.detailMask.buffer,
+          ];
+          if (masks.doorMask) transferables.push(masks.doorMask.buffer);
+          if (masks.windowMask) transferables.push(masks.windowMask.buffer);
 
-      (postMessage as (message: any, transfer: Transferable[]) => void)(
-        { id, type: 'SEGMENT_SUCCESS', payload: masks },
-        transferables
-      );
-    }
-  } catch (err) {
-    self.postMessage({
-      id,
-      type: 'ERROR',
-      error: err instanceof Error ? err.message : String(err),
+          (postMessage as (message: any, transfer: Transferable[]) => void)(
+            { id, type: 'SEGMENT_SUCCESS', payload: masks },
+            transferables
+          );
+        }
+      } catch (err) {
+        self.postMessage({
+          id,
+          type: 'ERROR',
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    })
+    .catch((err) => {
+      console.error('Worker internal queue uncaught error:', err);
     });
-  }
 };

@@ -1,4 +1,5 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
+import { ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
 import {
   FloorplanState,
   ToolMode,
@@ -137,6 +138,84 @@ export const FloorplanCanvas: React.FC<Props> = ({
     [pan, zoom]
   );
 
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
+  const panRef = useRef(pan);
+  panRef.current = pan;
+  const toolRef = useRef(tool);
+  toolRef.current = tool;
+
+  const touchGestureRef = useRef<{
+    initialDist: number;
+    initialZoom: number;
+    initialPan: { x: number; y: number };
+    initialMidX: number;
+    initialMidY: number;
+  } | null>(null);
+
+  const lastTapRef = useRef<{ time: number; x: number; y: number }>({ time: 0, x: 0, y: 0 });
+
+  const fitFloorplanToView = useCallback(() => {
+    if (!svgRef.current) return;
+    const rect = svgRef.current.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+
+    let minX = Infinity,
+      maxX = -Infinity,
+      minY = Infinity,
+      maxY = -Infinity;
+
+    for (const w of state.walls) {
+      minX = Math.min(minX, w.start.x, w.end.x);
+      maxX = Math.max(maxX, w.start.x, w.end.x);
+      minY = Math.min(minY, w.start.y, w.end.y);
+      maxY = Math.max(maxY, w.start.y, w.end.y);
+    }
+    for (const f of state.furniture) {
+      minX = Math.min(minX, f.x - f.width / 2);
+      maxX = Math.max(maxX, f.x + f.width / 2);
+      minY = Math.min(minY, f.y - f.depth / 2);
+      maxY = Math.max(maxY, f.y + f.depth / 2);
+    }
+    for (const d of state.doors) {
+      minX = Math.min(minX, d.x - d.width / 2);
+      maxX = Math.max(maxX, d.x + d.width / 2);
+      minY = Math.min(minY, d.y - d.width / 2);
+      maxY = Math.max(maxY, d.y + d.width / 2);
+    }
+    for (const m of state.measurements) {
+      minX = Math.min(minX, m.start.x, m.end.x);
+      maxX = Math.max(maxX, m.start.x, m.end.x);
+      minY = Math.min(minY, m.start.y, m.end.y);
+      maxY = Math.max(maxY, m.start.y, m.end.y);
+    }
+
+    if (!Number.isFinite(minX) || !Number.isFinite(maxX)) {
+      setZoom(1.0);
+      setPan({ x: Math.round(rect.width / 2 - 200), y: Math.round(rect.height / 2 - 150) });
+      return;
+    }
+
+    const padding = Math.min(rect.width, rect.height) < 500 ? 24 : 48;
+    const contentW = Math.max(maxX - minX, 80);
+    const contentH = Math.max(maxY - minY, 80);
+
+    const fitZoom = Math.min(
+      (rect.width - padding * 2) / contentW,
+      (rect.height - padding * 2) / contentH
+    );
+    const nextZoom = Math.min(Math.max(fitZoom, 0.15), 3.0);
+
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
+
+    setZoom(nextZoom);
+    setPan({
+      x: Math.round(rect.width / 2 - centerX * nextZoom),
+      y: Math.round(rect.height / 2 - centerY * nextZoom),
+    });
+  }, [state.walls, state.furniture, state.doors, state.measurements, setZoom, setPan]);
+
   // Mouse wheel zoom (attached with { passive: false } so preventDefault works without console warnings)
   useEffect(() => {
     const svgEl = svgRef.current;
@@ -144,16 +223,17 @@ export const FloorplanCanvas: React.FC<Props> = ({
 
     const handleNativeWheel = (e: WheelEvent) => {
       e.preventDefault();
-      const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
-      const newZoom = Math.min(Math.max(zoom * zoomFactor, 0.2), 4.0);
+      const currentZoom = zoomRef.current;
+      const zoomFactor = e.deltaY < 0 ? 1.12 : 0.88;
+      const newZoom = Math.min(Math.max(currentZoom * zoomFactor, 0.15), 5.0);
 
       const rect = svgEl.getBoundingClientRect();
       const cursorX = e.clientX - rect.left;
       const cursorY = e.clientY - rect.top;
 
       setPan((prevPan) => ({
-        x: cursorX - ((cursorX - prevPan.x) / zoom) * newZoom,
-        y: cursorY - ((cursorY - prevPan.y) / zoom) * newZoom,
+        x: cursorX - ((cursorX - prevPan.x) / currentZoom) * newZoom,
+        y: cursorY - ((cursorY - prevPan.y) / currentZoom) * newZoom,
       }));
       setZoom(newZoom);
     };
@@ -162,48 +242,46 @@ export const FloorplanCanvas: React.FC<Props> = ({
     return () => {
       svgEl.removeEventListener('wheel', handleNativeWheel);
     };
-  }, [zoom]);
+  }, [setZoom, setPan]);
 
   // Touch gestures: Pinch-to-zoom and two-finger pan
   useEffect(() => {
     const svgEl = svgRef.current;
     if (!svgEl) return;
 
-    let touchGesture: {
-      initialDist: number;
-      initialZoom: number;
-      initialPan: { x: number; y: number };
-      initialMidX: number;
-      initialMidY: number;
-    } | null = null;
-
     const handleTouchStart = (e: TouchEvent) => {
       if (e.touches.length >= 2) {
         e.preventDefault();
         setWallStart(null);
+        setWallCurrent(null);
+        setDoorStart(null);
+        setDoorCurrent(null);
+        setWindowStart(null);
+        setWindowCurrent(null);
         setMeasureStart(null);
+        setMeasureEnd(null);
         setCalibStart(null);
+        setCalibEnd(null);
         setSelectionBox(null);
         setIsPanning(false);
         setIsDragging(false);
         setResizeTarget(null);
+
         if (e.touches.length === 2) {
           const t1 = e.touches[0];
           const t2 = e.touches[1];
           const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
           const rect = svgEl.getBoundingClientRect();
-          touchGesture = {
-            initialDist: Math.max(dist, 1),
-            initialZoom: zoom,
-            initialPan: { ...pan },
+          touchGestureRef.current = {
+            initialDist: Math.max(dist, 10),
+            initialZoom: zoomRef.current,
+            initialPan: { ...panRef.current },
             initialMidX: (t1.clientX + t2.clientX) / 2 - rect.left,
             initialMidY: (t1.clientY + t2.clientY) / 2 - rect.top,
           };
         } else {
-          touchGesture = null;
+          touchGestureRef.current = null;
         }
-      } else {
-        touchGesture = null;
       }
     };
 
@@ -211,8 +289,8 @@ export const FloorplanCanvas: React.FC<Props> = ({
       if (e.touches.length >= 2) {
         e.preventDefault();
       }
-      if (e.touches.length === 2 && touchGesture) {
-        e.preventDefault();
+      const gesture = touchGestureRef.current;
+      if (e.touches.length === 2 && gesture) {
         const t1 = e.touches[0];
         const t2 = e.touches[1];
         const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
@@ -220,30 +298,28 @@ export const FloorplanCanvas: React.FC<Props> = ({
         const curMidX = (t1.clientX + t2.clientX) / 2 - rect.left;
         const curMidY = (t1.clientY + t2.clientY) / 2 - rect.top;
 
-        const scale = dist / touchGesture.initialDist;
-        const newZoom = Math.min(Math.max(touchGesture.initialZoom * scale, 0.2), 4.0);
+        // Scale ratio: moving fingers apart zooms in, together zooms out
+        const rawScale = dist / gesture.initialDist;
+        // Responsive curve: smaller pinch covers more range naturally on mobile screens
+        const scale = Math.pow(rawScale, 1.25);
+        const newZoom = Math.min(Math.max(gesture.initialZoom * scale, 0.15), 5.0);
 
-        const dx = curMidX - touchGesture.initialMidX;
-        const dy = curMidY - touchGesture.initialMidY;
+        const newPanX =
+          curMidX -
+          ((gesture.initialMidX - gesture.initialPan.x) / gesture.initialZoom) * newZoom;
+        const newPanY =
+          curMidY -
+          ((gesture.initialMidY - gesture.initialPan.y) / gesture.initialZoom) * newZoom;
 
         setZoom(newZoom);
-        setPan({
-          x:
-            touchGesture.initialMidX -
-            ((touchGesture.initialMidX - touchGesture.initialPan.x) / touchGesture.initialZoom) *
-              newZoom +
-            dx,
-          y:
-            touchGesture.initialMidY -
-            ((touchGesture.initialMidY - touchGesture.initialPan.y) / touchGesture.initialZoom) *
-              newZoom +
-            dy,
-        });
+        setPan({ x: newPanX, y: newPanY });
       }
     };
 
-    const handleTouchEnd = () => {
-      touchGesture = null;
+    const handleTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length < 2) {
+        touchGestureRef.current = null;
+      }
     };
 
     svgEl.addEventListener('touchstart', handleTouchStart, { passive: false });
@@ -257,9 +333,34 @@ export const FloorplanCanvas: React.FC<Props> = ({
       svgEl.removeEventListener('touchend', handleTouchEnd);
       svgEl.removeEventListener('touchcancel', handleTouchEnd);
     };
-  }, [zoom, pan]);
+  }, [setZoom, setPan]);
 
   const handlePointerDown = (e: React.PointerEvent) => {
+    // Double-tap to zoom in/out on mobile
+    if (e.pointerType === 'touch' && !isDragging && !resizeTarget && (tool === 'select' || tool === 'pan')) {
+      const now = Date.now();
+      const timeDelta = now - lastTapRef.current.time;
+      const distDelta = Math.hypot(
+        e.clientX - lastTapRef.current.x,
+        e.clientY - lastTapRef.current.y
+      );
+      if (timeDelta < 320 && distDelta < 28) {
+        lastTapRef.current = { time: 0, x: 0, y: 0 };
+        const rect = svgRef.current?.getBoundingClientRect();
+        if (rect) {
+          const cursorX = e.clientX - rect.left;
+          const cursorY = e.clientY - rect.top;
+          const targetZoom = zoomRef.current > 1.6 ? 0.9 : Math.min(zoomRef.current * 1.8, 3.5);
+          const newPanX = cursorX - ((cursorX - panRef.current.x) / zoomRef.current) * targetZoom;
+          const newPanY = cursorY - ((cursorY - panRef.current.y) / zoomRef.current) * targetZoom;
+          setZoom(targetZoom);
+          setPan({ x: newPanX, y: newPanY });
+          return;
+        }
+      }
+      lastTapRef.current = { time: now, x: e.clientX, y: e.clientY };
+    }
+
     if (e.button === 1 || tool === 'pan' || isSpacePressed) {
       setIsPanning(true);
       setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
@@ -2272,10 +2373,8 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   <circle
                     cx="0"
                     cy={-selectedWall.thickness / 2 - 38}
-                    r="8"
-                    fill="#2563eb"
-                    stroke="#ffffff"
-                    strokeWidth="2"
+                    r="22"
+                    fill="transparent"
                     className="cursor-grab active:cursor-grabbing"
                     onPointerDown={(e) => {
                       e.stopPropagation();
@@ -2283,14 +2382,21 @@ export const FloorplanCanvas: React.FC<Props> = ({
                       setIsRotating(true);
                     }}
                   />
+                  <circle
+                    cx="0"
+                    cy={-selectedWall.thickness / 2 - 38}
+                    r="8"
+                    fill="#2563eb"
+                    stroke="#ffffff"
+                    strokeWidth="2"
+                    style={{ pointerEvents: 'none' }}
+                  />
                 </g>
 
                 <g transform={`translate(${selectedWall.start.x}, ${selectedWall.start.y})`}>
                   <circle
-                    r="8"
-                    fill="#2563eb"
-                    stroke="#ffffff"
-                    strokeWidth="2.5"
+                    r="22"
+                    fill="transparent"
                     className="cursor-crosshair active:scale-125 transition-transform"
                     onPointerDown={(e) => {
                       e.stopPropagation();
@@ -2298,21 +2404,33 @@ export const FloorplanCanvas: React.FC<Props> = ({
                       setResizeTarget({ id: selectedWall.id, type: 'wall', handle: 'start' });
                     }}
                   />
-                  <circle r="3" fill="#ffffff" style={{ pointerEvents: 'none' }} />
-                </g>
-
-                <g transform={`translate(${selectedWall.end.x}, ${selectedWall.end.y})`}>
                   <circle
                     r="8"
                     fill="#2563eb"
                     stroke="#ffffff"
                     strokeWidth="2.5"
+                    style={{ pointerEvents: 'none' }}
+                  />
+                  <circle r="3" fill="#ffffff" style={{ pointerEvents: 'none' }} />
+                </g>
+
+                <g transform={`translate(${selectedWall.end.x}, ${selectedWall.end.y})`}>
+                  <circle
+                    r="22"
+                    fill="transparent"
                     className="cursor-crosshair active:scale-125 transition-transform"
                     onPointerDown={(e) => {
                       e.stopPropagation();
                       onStartInteraction?.();
                       setResizeTarget({ id: selectedWall.id, type: 'wall', handle: 'end' });
                     }}
+                  />
+                  <circle
+                    r="8"
+                    fill="#2563eb"
+                    stroke="#ffffff"
+                    strokeWidth="2.5"
+                    style={{ pointerEvents: 'none' }}
                   />
                   <circle r="3" fill="#ffffff" style={{ pointerEvents: 'none' }} />
                 </g>
@@ -2382,16 +2500,23 @@ export const FloorplanCanvas: React.FC<Props> = ({
               <circle
                 cx="0"
                 cy="-44"
-                r="8"
-                fill="#2563eb"
-                stroke="#ffffff"
-                strokeWidth="2"
+                r="22"
+                fill="transparent"
                 className="cursor-grab active:cursor-grabbing"
                 onPointerDown={(e) => {
                   e.stopPropagation();
                   onStartInteraction?.();
                   setIsRotating(true);
                 }}
+              />
+              <circle
+                cx="0"
+                cy="-44"
+                r="8"
+                fill="#2563eb"
+                stroke="#ffffff"
+                strokeWidth="2"
+                style={{ pointerEvents: 'none' }}
               />
             </g>
           )}
@@ -2465,16 +2590,23 @@ export const FloorplanCanvas: React.FC<Props> = ({
               <circle
                 cx="0"
                 cy={-selectedWindow.thickness / 2 - 34}
-                r="8"
-                fill="#2563eb"
-                stroke="#ffffff"
-                strokeWidth="2"
+                r="22"
+                fill="transparent"
                 className="cursor-grab active:cursor-grabbing"
                 onPointerDown={(e) => {
                   e.stopPropagation();
                   onStartInteraction?.();
                   setIsRotating(true);
                 }}
+              />
+              <circle
+                cx="0"
+                cy={-selectedWindow.thickness / 2 - 34}
+                r="8"
+                fill="#2563eb"
+                stroke="#ffffff"
+                strokeWidth="2"
+                style={{ pointerEvents: 'none' }}
               />
             </g>
           )}
@@ -2578,16 +2710,23 @@ export const FloorplanCanvas: React.FC<Props> = ({
               <circle
                 cx="0"
                 cy={-selectedFurniture.depth / 2 - 34}
-                r="8"
-                fill="#2563eb"
-                stroke="#ffffff"
-                strokeWidth="2"
+                r="22"
+                fill="transparent"
                 className="cursor-grab active:cursor-grabbing"
                 onPointerDown={(e) => {
                   e.stopPropagation();
                   onStartInteraction?.();
                   setIsRotating(true);
                 }}
+              />
+              <circle
+                cx="0"
+                cy={-selectedFurniture.depth / 2 - 34}
+                r="8"
+                fill="#2563eb"
+                stroke="#ffffff"
+                strokeWidth="2"
+                style={{ pointerEvents: 'none' }}
               />
             </g>
           )}
@@ -2802,16 +2941,23 @@ export const FloorplanCanvas: React.FC<Props> = ({
                 <circle
                   cx="0"
                   cy={-halfH - 32}
-                  r="7"
-                  fill="#2563eb"
-                  stroke="#ffffff"
-                  strokeWidth="2"
+                  r="22"
+                  fill="transparent"
                   className="cursor-grab active:cursor-grabbing"
                   onPointerDown={(e) => {
                     e.stopPropagation();
                     onStartInteraction?.();
                     setIsRotating(true);
                   }}
+                />
+                <circle
+                  cx="0"
+                  cy={-halfH - 32}
+                  r="7"
+                  fill="#2563eb"
+                  stroke="#ffffff"
+                  strokeWidth="2"
+                  style={{ pointerEvents: 'none' }}
                 />
               </g>
             );
@@ -2860,14 +3006,13 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   strokeWidth={isSelected ? '3' : '2'}
                   strokeDasharray="6 3"
                 />
+                {/* Start handle hit target */}
                 <circle
                   cx={m.start.x}
                   cy={m.start.y}
-                  r={isSelected ? '8' : '5'}
-                  fill={isSelected ? '#2563eb' : '#e11d48'}
-                  stroke="#ffffff"
-                  strokeWidth={isSelected ? '2.5' : '1.5'}
-                  className={isSelected ? 'cursor-crosshair active:scale-125 transition-transform' : ''}
+                  r="22"
+                  fill="transparent"
+                  className={isSelected ? 'cursor-crosshair' : ''}
                   onPointerDown={(e) => {
                     if (tool === 'select') {
                       e.stopPropagation();
@@ -2879,13 +3024,22 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   }}
                 />
                 <circle
-                  cx={m.end.x}
-                  cy={m.end.y}
+                  cx={m.start.x}
+                  cy={m.start.y}
                   r={isSelected ? '8' : '5'}
                   fill={isSelected ? '#2563eb' : '#e11d48'}
                   stroke="#ffffff"
                   strokeWidth={isSelected ? '2.5' : '1.5'}
-                  className={isSelected ? 'cursor-crosshair active:scale-125 transition-transform' : ''}
+                  className={isSelected ? 'active:scale-125 transition-transform' : ''}
+                  style={{ pointerEvents: 'none' }}
+                />
+                {/* End handle hit target */}
+                <circle
+                  cx={m.end.x}
+                  cy={m.end.y}
+                  r="22"
+                  fill="transparent"
+                  className={isSelected ? 'cursor-crosshair' : ''}
                   onPointerDown={(e) => {
                     if (tool === 'select') {
                       e.stopPropagation();
@@ -2895,6 +3049,16 @@ export const FloorplanCanvas: React.FC<Props> = ({
                       setResizeTarget({ id: m.id, type: 'measurement', handle: 'end' });
                     }
                   }}
+                />
+                <circle
+                  cx={m.end.x}
+                  cy={m.end.y}
+                  r={isSelected ? '8' : '5'}
+                  fill={isSelected ? '#2563eb' : '#e11d48'}
+                  stroke="#ffffff"
+                  strokeWidth={isSelected ? '2.5' : '1.5'}
+                  className={isSelected ? 'active:scale-125 transition-transform' : ''}
+                  style={{ pointerEvents: 'none' }}
                 />
                 <g transform={`translate(${midX}, ${midY})`}>
                   <rect
@@ -3097,6 +3261,44 @@ export const FloorplanCanvas: React.FC<Props> = ({
             Snap: <span className={state.gridSnap ? 'text-emerald-600 font-semibold' : 'text-slate-400'}>{state.gridSnap ? 'Active' : 'Off'}</span> (Zoom {Math.round(zoom * 100)}%)
           </span>
         </div>
+      </div>
+
+      <div className="canvas-zoom-controls">
+        <button
+          type="button"
+          className="canvas-zoom-btn"
+          onClick={() => {
+            const newZ = Math.min(zoom * 1.25, 5.0);
+            setZoom(newZ);
+          }}
+          title="Zoom In"
+          aria-label="Zoom in"
+        >
+          <ZoomIn size={18} />
+        </button>
+        <div className="canvas-zoom-divider" />
+        <button
+          type="button"
+          className="canvas-zoom-btn"
+          onClick={() => {
+            const newZ = Math.max(zoom * 0.75, 0.15);
+            setZoom(newZ);
+          }}
+          title="Zoom Out"
+          aria-label="Zoom out"
+        >
+          <ZoomOut size={18} />
+        </button>
+        <div className="canvas-zoom-divider" />
+        <button
+          type="button"
+          className="canvas-zoom-btn"
+          onClick={fitFloorplanToView}
+          title="Fit Floorplan to Screen"
+          aria-label="Fit floorplan to screen"
+        >
+          <Maximize2 size={16} />
+        </button>
       </div>
     </div>
   );

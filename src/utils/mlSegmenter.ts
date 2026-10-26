@@ -355,7 +355,24 @@ export async function segmentFloorplanMlBrowser(
     const id = msgId++;
     const rawRgba = rgba instanceof Uint8Array ? rgba : new Uint8Array(rgba);
     return new Promise((resolve, reject) => {
-      pendingCallbacks.set(id, { resolve, reject });
+      const timer = setTimeout(() => {
+        if (pendingCallbacks.has(id)) {
+          pendingCallbacks.delete(id);
+          reject(new Error('ML segmentation timed out'));
+        }
+      }, 30000);
+
+      pendingCallbacks.set(id, {
+        resolve: (val) => {
+          clearTimeout(timer);
+          resolve(val);
+        },
+        reject: (err) => {
+          clearTimeout(timer);
+          reject(err);
+        },
+      });
+
       worker.postMessage({
         id,
         type: 'SEGMENT',
