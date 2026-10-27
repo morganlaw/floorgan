@@ -1,4 +1,4 @@
-import * as ort from 'onnxruntime-web/wasm';
+import * as ort from 'onnxruntime-web';
 import {
   prepareModelInputTensor,
   logitsToSegmentationMasks,
@@ -64,6 +64,7 @@ async function fetchShardWithCache(url: string): Promise<Uint8Array> {
 
 let cachedSession: ort.InferenceSession | null = null;
 let sessionPromise: Promise<ort.InferenceSession> | null = null;
+let isWebGpuSession = false;
 
 async function getOrInitSession(modelUrl = DEFAULT_MODEL_URL): Promise<ort.InferenceSession> {
   if (cachedSession) return cachedSession;
@@ -90,11 +91,32 @@ async function getOrInitSession(modelUrl = DEFAULT_MODEL_URL): Promise<ort.Infer
       offset += part.byteLength;
     }
 
+    // 1. Attempt hardware-accelerated WebGPU if available in worker scope
+    if (
+      typeof navigator !== 'undefined' &&
+      'gpu' in navigator &&
+      Boolean(navigator.gpu)
+    ) {
+      try {
+        const session = await ort.InferenceSession.create(combined.buffer, {
+          executionProviders: ['webgpu'],
+          graphOptimizationLevel: 'all',
+        });
+        cachedSession = session;
+        isWebGpuSession = true;
+        return session;
+      } catch (err) {
+        console.warn('WebGPU execution provider failed in worker, falling back to WASM:', err);
+      }
+    }
+
+    // 2. Fallback to SIMD multi-threaded WASM
     const session = await ort.InferenceSession.create(combined.buffer, {
       executionProviders: ['wasm'],
       graphOptimizationLevel: 'all',
     });
     cachedSession = session;
+    isWebGpuSession = false;
     return session;
   })();
 
@@ -158,7 +180,56 @@ self.onmessage = (e: MessageEvent) => {
 
           const outputs = await session.run({ input_rgb: inputTensor });
           const logitsTensor = outputs.logits ?? Object.values(outputs)[0];
-          const logitsData = logitsTensor.data as Float32Array;
+          let logitsData = logitsTensor.data as Float32Array;
+
+          // 2-Pass Horizontal Flip TTA on WebGPU (takes <180ms on GPU; skipped on WASM to keep CPU fast)
+          if (isWebGpuSession) {
+            try {
+              const flippedRgba = new Uint8Array(rgba.length);
+              for (let y = 0; y < h; y++) {
+                const row = y * w * 4;
+                for (let x = 0; x < w; x++) {
+                  const s = row + x * 4;
+                  const d = row + (w - 1 - x) * 4;
+                  flippedRgba[d] = rgba[s];
+                  flippedRgba[d + 1] = rgba[s + 1];
+                  flippedRgba[d + 2] = rgba[s + 2];
+                  flippedRgba[d + 3] = rgba[s + 3];
+                }
+              }
+
+              const flippedInput = prepareModelInputTensor(flippedRgba, w, h, ML_MODEL_INPUT_SIZE);
+              const flippedTensor = new ort.Tensor('float32', flippedInput, [
+                1,
+                3,
+                ML_MODEL_INPUT_SIZE,
+                ML_MODEL_INPUT_SIZE,
+              ]);
+              const out2 = await session.run({ input_rgb: flippedTensor });
+              const out2Data = (out2.logits ?? Object.values(out2)[0]).data as Float32Array;
+
+              const planeSize = ML_MODEL_INPUT_SIZE * ML_MODEL_INPUT_SIZE;
+              const copyW = Math.min(w, ML_MODEL_INPUT_SIZE);
+              const copyH = Math.min(h, ML_MODEL_INPUT_SIZE);
+
+              const merged = new Float32Array(logitsData.length);
+              merged.set(logitsData);
+              for (let c = 0; c < 4; c++) {
+                const cOff = c * planeSize;
+                for (let y = 0; y < copyH; y++) {
+                  const row = cOff + y * ML_MODEL_INPUT_SIZE;
+                  for (let x = 0; x < copyW; x++) {
+                    const idx1 = row + x;
+                    const idx2 = row + (copyW - 1 - x);
+                    merged[idx1] = (logitsData[idx1] + out2Data[idx2]) * 0.5;
+                  }
+                }
+              }
+              logitsData = merged;
+            } catch (ttaErr) {
+              console.warn('WebGPU 2-pass TTA fallback to single-pass:', ttaErr);
+            }
+          }
 
           const masks = logitsToSegmentationMasks(
             logitsData,

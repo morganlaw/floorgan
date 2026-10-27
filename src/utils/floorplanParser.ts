@@ -103,7 +103,36 @@ export interface SegmentationMasks {
 
 export const ORIGIN_OFFSET_X = 100;
 export const ORIGIN_OFFSET_Y = 100;
-export const MAX_PROC_DIM = 750;
+export const MAX_PROC_DIM = 768;
+
+/**
+ * Automatically detects if an uploaded image is a dark blueprint / dark-mode plan
+ * (white or colored CAD lines on a dark blue/black background).
+ */
+export function isDarkBlueprintImage(
+  rgba: Uint8ClampedArray | Uint8Array,
+  w: number,
+  h: number
+): boolean {
+  const step = Math.max(1, Math.floor((w * h) / 1000));
+  let darkCount = 0;
+  let totalSampled = 0;
+
+  for (let i = 0; i < w * h; i += step) {
+    const sOff = i * 4;
+    const a = rgba[sOff + 3];
+    if (a > 50) {
+      const r = rgba[sOff];
+      const g = rgba[sOff + 1];
+      const b = rgba[sOff + 2];
+      const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+      if (lum < 95) darkCount++;
+      totalSampled++;
+    }
+  }
+
+  return totalSampled > 0 && darkCount / totalSampled > 0.60;
+}
 
 export interface HeuristicConfig {
     chromaThreshold: number;

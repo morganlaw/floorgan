@@ -14,6 +14,7 @@ import { FloorplanState } from '../types';
 import {
   MAX_PROC_DIM,
   DEFAULT_PARSE_OPTIONS,
+  ParseOptions,
   ParseResult,
   RawDimensionCandidate,
   RawRoomNameCandidate,
@@ -25,6 +26,7 @@ import {
   fetchImageUrlAsDataUrl,
   createSampleBlueprintDataUrl,
   terminateOcrWorker,
+  isDarkBlueprintImage,
 } from '../utils/floorplanParser.ts';
 import {
   segmentFloorplanMlBrowser,
@@ -54,7 +56,11 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   const [urlError, setUrlError] = useState<string | null>(null);
   const [urlCandidates, setUrlCandidates] = useState<{ url: string; label: string }[]>([]);
 
-  const options = DEFAULT_PARSE_OPTIONS;
+  const [invertColors, setInvertColors] = useState<boolean>(false);
+  const options = React.useMemo<ParseOptions>(
+    () => ({ ...DEFAULT_PARSE_OPTIONS, invert: invertColors }),
+    [invertColors]
+  );
   const [ocrCandidates, setOcrCandidates] = useState<RawDimensionCandidate[]>([]);
   const [roomCandidates, setRoomCandidates] = useState<RawRoomNameCandidate[]>([]);
   const [ocrTextBoxes, setOcrTextBoxes] = useState<OcrTextBoxPx[]>([]);
@@ -126,6 +132,25 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     }
     const img = new Image();
     img.onload = () => {
+      try {
+        const c = document.createElement('canvas');
+        const sw = Math.min(128, img.naturalWidth || img.width || 128);
+        const sh = Math.min(128, img.naturalHeight || img.height || 128);
+        c.width = sw;
+        c.height = sh;
+        const ctx = c.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, sw, sh);
+          const data = ctx.getImageData(0, 0, sw, sh);
+          if (isDarkBlueprintImage(data.data, sw, sh)) {
+            setInvertColors(true);
+          } else {
+            setInvertColors(false);
+          }
+        }
+      } catch (err) {
+        console.warn('Blueprint auto-detect warning:', err);
+      }
       setLoadedImageEl(img);
     };
     img.src = imageDataUrl;
@@ -462,6 +487,15 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                     </button>
                   </div>
                 </div>
+
+                <label className="checkbox-row" style={{ marginTop: '0.25rem', marginBottom: '0.25rem' }}>
+                  <input
+                    type="checkbox"
+                    checked={invertColors}
+                    onChange={(e) => setInvertColors(e.target.checked)}
+                  />
+                  <span>Invert blueprint colors (light lines on dark background)</span>
+                </label>
 
                 {isScanningOcr && (
                   <div className="text-xs text-slate-500 flex items-center gap-1.5 py-1">

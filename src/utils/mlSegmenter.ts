@@ -1,4 +1,4 @@
-import * as ort from 'onnxruntime-web/wasm';
+import * as ort from 'onnxruntime-web';
 import {
   segmentFloorplanOtsu,
   type OcrTextBoxPx,
@@ -246,6 +246,25 @@ export async function getBrowserMlSession(
       offset += part.byteLength;
     }
 
+    // 1. Attempt hardware-accelerated WebGPU if available in current scope
+    if (
+      typeof navigator !== 'undefined' &&
+      'gpu' in navigator &&
+      Boolean(navigator.gpu)
+    ) {
+      try {
+        const session = await ort.InferenceSession.create(combined.buffer, {
+          executionProviders: ['webgpu'],
+          graphOptimizationLevel: 'all',
+        });
+        cachedSession = session;
+        return session;
+      } catch (err) {
+        console.warn('WebGPU execution provider failed, falling back to WASM:', err);
+      }
+    }
+
+    // 2. Fallback to SIMD multi-threaded WASM
     const session = await ort.InferenceSession.create(combined.buffer, {
       executionProviders: ['wasm'],
       graphOptimizationLevel: 'all',
