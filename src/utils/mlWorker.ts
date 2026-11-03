@@ -1,13 +1,12 @@
-// ONNX Runtime lives only in this worker. Two backends:
-//  - WebGPU + FP16 model (fast path, ~0.25 s per pass on a laptop GPU)
-//  - WASM + dynamic-INT8 model (fallback when WebGPU is unavailable, fails or stalls)
-// Each ORT build is loaded lazily so a browser only downloads the one it uses.
+// ONNX Runtime lives only in this worker.
+// Try WebGPU (FP16 model) if available; on any error or timeout fall back to the CPU
+// (WASM, INT8 model). Each ORT build is loaded lazily, so a browser only downloads
+// what it uses.
 import type * as OrtTypes from 'onnxruntime-web';
 import {
   prepareModelInputTensor,
   logitsToSegmentationMasks,
   fetchModelParts,
-  hasWebGpuAdapter,
   ML_MODEL_INPUT_SIZE,
   CPU_MODEL_PART_URLS,
   GPU_MODEL_PART_URLS,
@@ -25,9 +24,11 @@ interface LoadedSession {
   backend: MlBackend;
 }
 
-/** Budget for GPU setup steps (excludes downloads). On timeout we fall back to WASM. */
-const ADAPTER_TIMEOUT_MS = 5_000;
-const WEBGPU_SETUP_TIMEOUT_MS = 30_000;
+/**
+ * WebGPU setup (session creation + shader warm-up) normally takes 2-4 s. On some
+ * GPU/driver combinations it hangs instead of throwing, so it gets a time limit.
+ */
+const WEBGPU_SETUP_TIMEOUT_MS = 15_000;
 
 function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -49,38 +50,37 @@ let loaded: LoadedSession | null = null;
 let loadingPromise: Promise<LoadedSession> | null = null;
 
 async function createWebGpuSession(): Promise<LoadedSession> {
-  // Aliased in vite.config.ts to ORT's "extern wasm" WebGPU build so the 26.8 MB
-  // runtime binary is not bundled into dist/ (Cloudflare's per-file limit is 25 MiB).
-  // It is loaded instead from jsDelivr, pinned to the exact installed ORT version
-  // (brotli-compressed to ~4.7 MB over the wire).
+  // Aliased in vite.config.ts to ORT's "extern wasm" WebGPU build so its 26.8 MB
+  // runtime binary isn't bundled into dist/ (Cloudflare's per-file limit is 25 MiB);
+  // it loads from jsDelivr, pinned to the installed ORT version.
   const ort = (await import('onnxruntime-web/webgpu')) as unknown as Ort;
-  const version = ort.env.versions.web ?? ort.env.versions.common;
-  const cdn = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${version}/dist/`;
+  const cdn = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ort.env.versions.web ?? ort.env.versions.common}/dist/`;
   ort.env.wasm.wasmPaths = {
     mjs: `${cdn}ort-wasm-simd-threaded.asyncify.mjs`,
     wasm: `${cdn}ort-wasm-simd-threaded.asyncify.wasm`,
   };
+  // Use the GPU that's already driving the display. On dual-GPU laptops, waking the
+  // discrete GPU can make the OS switch graphics and stall WebGPU; on single-GPU
+  // devices (phones, Apple Silicon, most desktops) this has no effect.
+  ort.env.webgpu.powerPreference = 'low-power';
 
+  // Download outside the time limit so a slow connection isn't mistaken for a GPU hang.
   const model = await fetchModelParts(GPU_MODEL_PART_URLS);
 
-  // GPU setup normally takes 1-4 s, but some GPU/driver combinations stall
-  // indefinitely; bound it so the caller can fall back to WASM.
   const session = await withTimeout(
     (async () => {
       const s = await ort.InferenceSession.create(model, {
         executionProviders: ['webgpu'],
         graphOptimizationLevel: 'all',
       });
-      // The first WebGPU run compiles shaders (~2 s); do it now, while the import
-      // dialog is open, instead of on the user's first segmentation.
+      // The first run compiles shaders (~1-2 s); do it now while the dialog is open.
       const dummy = new ort.Tensor('float32', new Float32Array(3 * N * N).fill(1), [1, 3, N, N]);
       await s.run({ input_rgb: dummy });
       return s;
     })(),
     WEBGPU_SETUP_TIMEOUT_MS,
-    'WebGPU session setup'
+    'WebGPU setup'
   );
-
   return { ort, session, backend: 'webgpu' };
 }
 
@@ -97,25 +97,18 @@ async function createWasmSession(): Promise<LoadedSession> {
   return { ort, session, backend: 'wasm' };
 }
 
+/** Try WebGPU if the browser has it; on any error or timeout, use the CPU (WASM). */
 async function getOrInitSession(): Promise<LoadedSession> {
   if (loaded) return loaded;
   if (loadingPromise) return loadingPromise;
 
   loadingPromise = (async () => {
-    const gpuAvailable = await withTimeout(
-      hasWebGpuAdapter(),
-      ADAPTER_TIMEOUT_MS,
-      'WebGPU adapter request'
-    ).catch((err) => {
-      console.warn(err);
-      return false;
-    });
-    if (gpuAvailable) {
+    if ('gpu' in navigator) {
       try {
         loaded = await createWebGpuSession();
         return loaded;
       } catch (err) {
-        console.warn('WebGPU session failed, falling back to WASM:', err);
+        console.warn('WebGPU failed, using CPU instead:', err);
       }
     }
     loaded = await createWasmSession();

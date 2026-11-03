@@ -38,17 +38,6 @@ export const GPU_MODEL_PART_URLS = partUrls('floorplan-seg-v1-fp16.onnx', 6);
 
 export type MlBackend = 'webgpu' | 'wasm';
 
-/** True when a usable WebGPU adapter exists in this context (window or worker). */
-export async function hasWebGpuAdapter(): Promise<boolean> {
-  try {
-    const gpu = (navigator as { gpu?: { requestAdapter(): Promise<unknown | null> } }).gpu;
-    if (!gpu) return false;
-    return (await gpu.requestAdapter()) !== null;
-  } catch {
-    return false;
-  }
-}
-
 // Same cache name and CPU-model URLs as the previous v1 release, so returning
 // visitors who already cached those shards don't download them again.
 export const MODEL_CACHE_NAME = 'floorgan-models-v1';
