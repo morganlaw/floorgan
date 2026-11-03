@@ -60,13 +60,16 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   useEffect(() => {
     if (!showImportHint) return;
 
-    const handleDismiss = () => {
+    const handleDismiss = (e: PointerEvent) => {
+      if ((e.target as HTMLElement)?.closest?.('.import-indicator-callout')) {
+        return;
+      }
       setShowImportHint(false);
     };
 
-    window.addEventListener('pointerdown', handleDismiss, { capture: true });
+    window.addEventListener('pointerdown', handleDismiss);
     return () => {
-      window.removeEventListener('pointerdown', handleDismiss, { capture: true });
+      window.removeEventListener('pointerdown', handleDismiss);
     };
   }, [showImportHint]);
 
@@ -129,7 +132,10 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         {showImportHint && (
           <div
             className="import-indicator-callout"
-            onPointerDown={() => onOpenImportModal()}
+            onClick={() => {
+              setShowImportHint(false);
+              onOpenImportModal();
+            }}
             role="tooltip"
           >
             <div className="import-indicator-arrow" />

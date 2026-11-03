@@ -8,7 +8,6 @@ import {
 } from './floorplanParser.ts';
 
 export const ML_MODEL_INPUT_SIZE = 768;
-export const ML_MODEL_NUM_PARTS = 3;
 
 ort.env.wasm.simd = 'relaxed';
 
@@ -18,12 +17,12 @@ const viteBaseUrl =
     ? (import.meta as unknown as { env: { BASE_URL: string } }).env.BASE_URL
     : '/';
 
-export const DEFAULT_MODEL_URL = `${viteBaseUrl.endsWith('/') ? viteBaseUrl : `${viteBaseUrl}/`}models/floorplan-seg-v1.onnx`;
+export const DEFAULT_MODEL_URL = `${viteBaseUrl.endsWith('/') ? viteBaseUrl : `${viteBaseUrl}/`}models/floorplan-seg-v2.onnx`;
 
-export const MODEL_CACHE_NAME = 'floorgan-models-v1';
+export const MODEL_CACHE_NAME = 'floorgan-models-v2';
 export const MODEL_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
-export async function fetchShardWithCache(url: string): Promise<Uint8Array> {
+export async function fetchModelWithCache(url: string): Promise<Uint8Array> {
   if (typeof caches !== 'undefined') {
     try {
       const cache = await caches.open(MODEL_CACHE_NAME);
@@ -52,7 +51,7 @@ export async function fetchShardWithCache(url: string): Promise<Uint8Array> {
 
       const resp = await fetch(url);
       if (!resp.ok) {
-        throw new Error(`Failed to fetch model shard ${url}: ${resp.status}`);
+        throw new Error(`Failed to fetch model ${url}: ${resp.status}`);
       }
       const data = await resp.arrayBuffer();
       const headers = new Headers(resp.headers);
@@ -61,35 +60,32 @@ export async function fetchShardWithCache(url: string): Promise<Uint8Array> {
       await cache.put(url, toCache);
       return new Uint8Array(data);
     } catch (err) {
-      console.warn('CacheStorage failed for shard, falling back to direct fetch:', err);
+      console.warn('CacheStorage failed for model, falling back to direct fetch:', err);
     }
   }
 
   const resp = await fetch(url);
   if (!resp.ok) {
-    throw new Error(`Failed to fetch model shard ${url}: ${resp.status}`);
+    throw new Error(`Failed to fetch model ${url}: ${resp.status}`);
   }
   return new Uint8Array(await resp.arrayBuffer());
 }
 
+export const fetchShardWithCache = fetchModelWithCache;
+
 export async function prewarmModelCache(modelUrl = DEFAULT_MODEL_URL): Promise<void> {
   if (typeof caches === 'undefined') return;
   const cache = await caches.open(MODEL_CACHE_NAME);
-  await Promise.all(
-    Array.from({ length: ML_MODEL_NUM_PARTS }, async (_, idx) => {
-      const shardUrl = `${modelUrl}.part${idx}`;
-      const match = await cache.match(shardUrl);
-      if (!match) {
-        const resp = await fetch(shardUrl);
-        if (resp.ok) {
-          const headers = new Headers(resp.headers);
-          headers.set('x-floorgan-cached-at', String(Date.now()));
-          const toCache = new Response(await resp.arrayBuffer(), { headers });
-          await cache.put(shardUrl, toCache);
-        }
-      }
-    })
-  );
+  const match = await cache.match(modelUrl);
+  if (!match) {
+    const resp = await fetch(modelUrl);
+    if (resp.ok) {
+      const headers = new Headers(resp.headers);
+      headers.set('x-floorgan-cached-at', String(Date.now()));
+      const toCache = new Response(await resp.arrayBuffer(), { headers });
+      await cache.put(modelUrl, toCache);
+    }
+  }
 }
 
 let cachedSession: ort.InferenceSession | null = null;
@@ -173,7 +169,7 @@ export function logitsToSegmentationMasks(
         doorMask[outIdx] = 1;
       } else if (pWin >= 0.38 && pWin >= pDoor && pWin >= pWall * 0.85) {
         windowMask[outIdx] = 1;
-      } else if (pWall >= 0.42 || (l1 > l0 && l1 >= l2 && l1 >= l3)) {
+      } else if (pWall >= 0.70 || (pWall >= 0.40 && baseMasks.rawMask[outIdx])) {
         structuralMask[outIdx] = 1;
       }
     }
@@ -232,19 +228,7 @@ export async function getBrowserMlSession(
       ? Math.min(4, navigator.hardwareConcurrency || 2)
       : 1;
 
-    const partBuffers = await Promise.all(
-      Array.from({ length: ML_MODEL_NUM_PARTS }, (_, idx) =>
-        fetchShardWithCache(`${modelUrl}.part${idx}`)
-      )
-    );
-
-    const totalLen = partBuffers.reduce((acc, b) => acc + b.byteLength, 0);
-    const combined = new Uint8Array(totalLen);
-    let offset = 0;
-    for (const part of partBuffers) {
-      combined.set(part, offset);
-      offset += part.byteLength;
-    }
+    const modelBuffer = await fetchModelWithCache(modelUrl);
 
     // 1. Attempt hardware-accelerated WebGPU if available in current scope
     if (
@@ -253,7 +237,7 @@ export async function getBrowserMlSession(
       Boolean(navigator.gpu)
     ) {
       try {
-        const session = await ort.InferenceSession.create(combined.buffer, {
+        const session = await ort.InferenceSession.create(modelBuffer.buffer, {
           executionProviders: ['webgpu'],
           graphOptimizationLevel: 'all',
         });
@@ -265,7 +249,7 @@ export async function getBrowserMlSession(
     }
 
     // 2. Fallback to SIMD multi-threaded WASM
-    const session = await ort.InferenceSession.create(combined.buffer, {
+    const session = await ort.InferenceSession.create(modelBuffer.buffer, {
       executionProviders: ['wasm'],
       graphOptimizationLevel: 'all',
     });

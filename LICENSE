@@ -24,7 +24,7 @@ SOFTWARE.
 
 THIRD-PARTY DATASET & MODEL WEIGHTS NOTICE
 
-The pretrained floorplan segmentation model weights (`public/models/floorplan-seg-v1.onnx*`)
+The pretrained floorplan segmentation model weights (`public/models/floorplan-seg*`)
 were trained on the CubiCasa5K dataset (Kalervo et al., "CubiCasa5K: A Dataset and an
 Improved Multi-Task Model for Floorplan Image Analysis", SCIA 2019) and are distributed
 under the Creative Commons Attribution-NonCommercial 4.0 International License (CC BY-NC 4.0):

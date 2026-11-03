@@ -28,15 +28,6 @@
   gap: 12px;
   z-index: 10;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-  overflow-x: auto;
-  overflow-y: hidden;
-  white-space: nowrap;
-  scrollbar-width: none;
-  -webkit-overflow-scrolling: touch;
-}
-
-.toolbar::-webkit-scrollbar {
-  display: none;
 }
 
 .brand,
@@ -862,6 +853,15 @@ kbd {
   }
   50% {
     transform: translateX(-50%) translateY(4px);
+  }
+}
+
+@keyframes indicator-bounce-mobile {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(4px);
   }
 }
 
@@ -1801,7 +1801,17 @@ kbd {
   }
 
   .import-indicator-callout {
-    display: none !important;
+    position: fixed;
+    top: 58px;
+    left: 12px;
+    transform: none;
+    max-width: calc(100vw - 24px);
+    z-index: 100;
+    animation: indicator-bounce-mobile 2s ease-in-out infinite;
+  }
+
+  .import-indicator-callout .import-indicator-arrow {
+    left: 60px;
   }
 
   .brand,

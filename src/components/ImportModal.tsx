@@ -476,7 +476,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                       className={`import-tab ${parserEngine === 'ml' ? 'active' : ''}`}
                       onClick={() => setParserEngine('ml')}
                     >
-                      <span>Neural Model (ConvNeXt-UNet)</span>
+                      <span>Neural Model (ConvNeXt-V2)</span>
                     </button>
                     <button
                       type="button"

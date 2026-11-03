@@ -3,17 +3,16 @@ import {
   prepareModelInputTensor,
   logitsToSegmentationMasks,
   ML_MODEL_INPUT_SIZE,
-  ML_MODEL_NUM_PARTS,
   DEFAULT_MODEL_URL,
 } from './mlSegmenter.ts';
 import type { ParseOptions, OcrTextBoxPx } from './floorplanParser.ts';
 
 ort.env.wasm.simd = 'relaxed';
 
-const MODEL_CACHE_NAME = 'floorgan-models-v1';
+const MODEL_CACHE_NAME = 'floorgan-models-v2';
 const MODEL_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
-async function fetchShardWithCache(url: string): Promise<Uint8Array> {
+async function fetchModelWithCache(url: string): Promise<Uint8Array> {
   if (typeof caches !== 'undefined') {
     try {
       const cache = await caches.open(MODEL_CACHE_NAME);
@@ -42,7 +41,7 @@ async function fetchShardWithCache(url: string): Promise<Uint8Array> {
 
       const resp = await fetch(url);
       if (!resp.ok) {
-        throw new Error(`Failed to fetch model shard ${url}: ${resp.status}`);
+        throw new Error(`Failed to fetch model ${url}: ${resp.status}`);
       }
       const data = await resp.arrayBuffer();
       const headers = new Headers(resp.headers);
@@ -51,13 +50,13 @@ async function fetchShardWithCache(url: string): Promise<Uint8Array> {
       await cache.put(url, toCache);
       return new Uint8Array(data);
     } catch (err) {
-      console.warn('CacheStorage failed for shard, falling back to network:', err);
+      console.warn('CacheStorage failed for model, falling back to network:', err);
     }
   }
 
   const resp = await fetch(url);
   if (!resp.ok) {
-    throw new Error(`Failed to fetch model shard ${url}: ${resp.status}`);
+    throw new Error(`Failed to fetch model ${url}: ${resp.status}`);
   }
   return new Uint8Array(await resp.arrayBuffer());
 }
@@ -77,19 +76,7 @@ async function getOrInitSession(modelUrl = DEFAULT_MODEL_URL): Promise<ort.Infer
       ? Math.min(4, navigator.hardwareConcurrency || 2)
       : 1;
 
-    const partBuffers = await Promise.all(
-      Array.from({ length: ML_MODEL_NUM_PARTS }, (_, idx) =>
-        fetchShardWithCache(`${modelUrl}.part${idx}`)
-      )
-    );
-
-    const totalLen = partBuffers.reduce((acc, b) => acc + b.byteLength, 0);
-    const combined = new Uint8Array(totalLen);
-    let offset = 0;
-    for (const part of partBuffers) {
-      combined.set(part, offset);
-      offset += part.byteLength;
-    }
+    const modelBuffer = await fetchModelWithCache(modelUrl);
 
     // 1. Attempt hardware-accelerated WebGPU if available in worker scope
     if (
@@ -98,7 +85,7 @@ async function getOrInitSession(modelUrl = DEFAULT_MODEL_URL): Promise<ort.Infer
       Boolean(navigator.gpu)
     ) {
       try {
-        const session = await ort.InferenceSession.create(combined.buffer, {
+        const session = await ort.InferenceSession.create(modelBuffer.buffer, {
           executionProviders: ['webgpu'],
           graphOptimizationLevel: 'all',
         });
@@ -111,7 +98,7 @@ async function getOrInitSession(modelUrl = DEFAULT_MODEL_URL): Promise<ort.Infer
     }
 
     // 2. Fallback to SIMD multi-threaded WASM
-    const session = await ort.InferenceSession.create(combined.buffer, {
+    const session = await ort.InferenceSession.create(modelBuffer.buffer, {
       executionProviders: ['wasm'],
       graphOptimizationLevel: 'all',
     });
