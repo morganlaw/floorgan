@@ -28,6 +28,10 @@
   gap: 12px;
   z-index: 10;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  /* Safety net: never let controls fall off-screen on narrower desktops. */
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
 }
 
 .brand,
@@ -38,8 +42,8 @@
   flex-shrink: 0;
 }
 
-/* Tablet & Laptop Toolbar Auto-Adjustment (861px to 1200px) */
-@media (max-width: 1200px) and (min-width: 861px) {
+/* Laptop Toolbar: icon-only tools when full labels don't fit (~1378px needed) */
+@media (max-width: 1380px) and (min-width: 861px) {
   .tool-btn span {
     display: none;
   }
@@ -49,6 +53,10 @@
   .import-highlight-btn span {
     display: inline;
   }
+}
+
+/* Tablet & Laptop Panel Auto-Adjustment (861px to 1200px) */
+@media (max-width: 1200px) and (min-width: 861px) {
   .sidebar {
     width: 230px;
   }
@@ -803,10 +811,13 @@ kbd {
 }
 
 .import-indicator-callout {
-  position: absolute;
-  top: calc(100% + 12px);
+  /* Fixed (anchored from Toolbar.tsx) so the scrollable toolbar can't clip it. */
+  position: fixed;
+  top: 68px;
   left: 50%;
   transform: translateX(-50%);
+  font: inherit;
+  text-align: left;
   background-color: #0f172a;
   color: #ffffff;
   padding: 10px 14px;
@@ -2199,4 +2210,12 @@ kbd {
   .creator-stage {
     min-height: 200px;
   }
+}
+
+/* Visible keyboard focus for all interactive controls */
+button:focus-visible,
+[role='button']:focus-visible,
+a:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
 }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, Armchair, SlidersHorizontal, MousePointer, Square, DoorOpen, Hand } from 'lucide-react';
 import { FloorplanState, SelectedElementType, ToolMode } from './types';
 import { TEMPLATES } from './templates';
@@ -12,6 +12,20 @@ import { prewarmModelCache } from './utils/mlSegmenter.ts';
 import './App.css';
 
 const STORAGE_KEY = 'floorgan_floorplan_v1';
+const SAVE_DEBOUNCE_MS = 400;
+
+function saveFloorplan(state: FloorplanState): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, background: null }));
+      console.warn('Floorplan saved without background image (storage quota exceeded)');
+    } catch (innerErr) {
+      console.warn('Could not save floorplan to localStorage', innerErr);
+    }
+  }
+}
 
 function getInitialFloorplan(): FloorplanState {
   try {
@@ -43,17 +57,34 @@ export const App: React.FC = () => {
     endInteraction,
   } = useFloorplanHistory(getInitialFloorplan());
 
+  // Persist with a debounce: state changes on every pointer move while dragging,
+  // and serializing the whole plan (including the background image data URL)
+  // synchronously on each move causes visible jank.
+  const latestStateRef = useRef(state);
+  latestStateRef.current = state;
+  const pendingSaveRef = useRef<number | null>(null);
+
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    } catch {
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, background: null }));
-      } catch (innerErr) {
-        console.warn('Could not save floorplan to localStorage', innerErr);
-      }
-    }
+    if (pendingSaveRef.current !== null) window.clearTimeout(pendingSaveRef.current);
+    pendingSaveRef.current = window.setTimeout(() => {
+      pendingSaveRef.current = null;
+      saveFloorplan(latestStateRef.current);
+    }, SAVE_DEBOUNCE_MS);
   }, [state]);
+
+  useEffect(() => {
+    const flush = () => {
+      if (pendingSaveRef.current === null) return;
+      window.clearTimeout(pendingSaveRef.current);
+      pendingSaveRef.current = null;
+      saveFloorplan(latestStateRef.current);
+    };
+    window.addEventListener('pagehide', flush);
+    return () => {
+      window.removeEventListener('pagehide', flush);
+      flush();
+    };
+  }, []);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -75,6 +106,8 @@ export const App: React.FC = () => {
 
   const [zoom, setZoom] = useState<number>(0.9);
   const [pan, setPan] = useState<{ x: number; y: number }>({ x: 140, y: 100 });
+  // Bumped to ask the canvas to fit the plan to the viewport (also runs on mount).
+  const [fitViewToken, setFitViewToken] = useState<number>(0);
   const [showHelp, setShowHelp] = useState<boolean>(false);
   const [showImportModal, setShowImportModal] = useState<boolean>(false);
   const [mobileDrawer, setMobileDrawer] = useState<'none' | 'catalog' | 'properties'>('none');
@@ -105,6 +138,15 @@ export const App: React.FC = () => {
       }
     }
   }, [state, selectedId, selectedIds]);
+
+  useEffect(() => {
+    if (!showHelp) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowHelp(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showHelp]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -143,9 +185,6 @@ export const App: React.FC = () => {
         setTool={setTool}
         state={state}
         setState={setState}
-        zoom={zoom}
-        setZoom={setZoom}
-        setPan={setPan}
         setSelectedId={setSelectedId}
         setSelectedIds={setSelectedIds}
         setSelectedType={setSelectedType}
@@ -157,7 +196,7 @@ export const App: React.FC = () => {
         canRedo={canRedo}
       />
 
-      <div className="workspace">
+      <main className="workspace">
         <Sidebar
           state={state}
           setState={setState}
@@ -184,6 +223,7 @@ export const App: React.FC = () => {
           setPan={setPan}
           onStartInteraction={startInteraction}
           onEndInteraction={endInteraction}
+          fitViewToken={fitViewToken}
         />
 
         <PropertiesPanel
@@ -199,7 +239,7 @@ export const App: React.FC = () => {
           className={mobileDrawer === 'properties' ? 'mobile-open' : ''}
           onClose={() => setMobileDrawer('none')}
         />
-      </div>
+      </main>
 
       {mobileDrawer !== 'none' && (
         <div
@@ -300,17 +340,27 @@ export const App: React.FC = () => {
           setSelectedId(null);
           setSelectedIds([]);
           setSelectedType(null);
-          setZoom(0.75);
-          setPan({ x: 120, y: 80 });
+          setFitViewToken((t) => t + 1);
         }}
       />
 
       {showHelp && (
         <div className="modal-backdrop" onClick={() => setShowHelp(false)}>
-          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="modal-card"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="help-modal-title"
+          >
             <div className="modal-header">
-              <h3 className="modal-title">Floorgan Guide</h3>
-              <button className="modal-close" onClick={() => setShowHelp(false)}>
+              <h3 className="modal-title" id="help-modal-title">Floorgan Guide</h3>
+              <button
+                type="button"
+                className="modal-close"
+                onClick={() => setShowHelp(false)}
+                aria-label="Close"
+              >
                 <X size={18} />
               </button>
             </div>

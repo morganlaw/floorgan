@@ -32,6 +32,7 @@ import {
   segmentFloorplanMlBrowser,
   prewarmBrowserMl,
   releaseBrowserMlSession,
+  type MlBackend,
 } from '../utils/mlSegmenter.ts';
 
 interface ImportModalProps {
@@ -69,6 +70,8 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   const [parserEngine, setParserEngine] = useState<'ml' | 'otsu'>('ml');
   const [mlMasks, setMlMasks] = useState<SegmentationMasks | null>(null);
   const [isRunningMl, setIsRunningMl] = useState<boolean>(false);
+  const [mlError, setMlError] = useState<string | null>(null);
+  const [mlBackend, setMlBackend] = useState<MlBackend | null>(null);
   const [parseResult, setParseResult] = useState<ParseResult | null>(null);
   const [previewMode, setPreviewMode] = useState<'overlay' | 'mask'>('overlay');
   const [includeUnderlay, setIncludeUnderlay] = useState<boolean>(true);
@@ -76,6 +79,9 @@ export const ImportModal: React.FC<ImportModalProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const mlRunningRef = useRef<boolean>(false);
+  // Incremented whenever the ML input changes (new image or invert toggle) so a
+  // run that finishes after its input went stale can be ignored.
+  const mlRunIdRef = useRef<number>(0);
   const loadedImageElRef = useRef<HTMLImageElement | null>(null);
 
   useEffect(() => {
@@ -113,8 +119,19 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   }, [isOpen]);
 
   useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
+  useEffect(() => {
     if (isOpen) {
-      prewarmBrowserMl().catch(() => {});
+      prewarmBrowserMl()
+        .then((backend) => setMlBackend(backend))
+        .catch(() => {});
     } else {
       releaseBrowserMlSession().catch(() => {});
       terminateOcrWorker().catch(() => {});
@@ -187,7 +204,9 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   // Invalidate ML masks when a new image is loaded or inverted
   useEffect(() => {
     setMlMasks(null);
+    setMlError(null);
     mlRunningRef.current = false;
+    mlRunIdRef.current += 1;
   }, [loadedImageEl, options.invert]);
 
   useEffect(() => {
@@ -196,7 +215,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
       return;
     }
 
-    if (mlMasks) {
+    if (mlMasks || mlError) {
       setIsRunningMl(false);
       return;
     }
@@ -208,6 +227,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
 
     mlRunningRef.current = true;
     setIsRunningMl(true);
+    const runId = mlRunIdRef.current;
 
     const naturalW = loadedImageEl.naturalWidth || loadedImageEl.width || 600;
     const naturalH = loadedImageEl.naturalHeight || loadedImageEl.height || 450;
@@ -223,24 +243,26 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     ctx.fillRect(0, 0, w, h);
     ctx.drawImage(loadedImageEl, 0, 0, w, h);
     const imgData = ctx.getImageData(0, 0, w, h);
-    const targetImg = loadedImageEl;
 
     segmentFloorplanMlBrowser(imgData.data, w, h, options, ocrTextBoxes)
       .then((masks) => {
-        if (loadedImageElRef.current === targetImg) {
+        if (mlRunIdRef.current === runId) {
           setMlMasks(masks);
         }
       })
       .catch((err) => {
         console.warn('Segmentation fallback to Otsu:', err);
+        if (mlRunIdRef.current === runId) {
+          setMlError(err instanceof Error ? err.message : String(err));
+        }
       })
       .finally(() => {
-        mlRunningRef.current = false;
-        if (loadedImageElRef.current === targetImg) {
+        if (mlRunIdRef.current === runId) {
+          mlRunningRef.current = false;
           setIsRunningMl(false);
         }
       });
-  }, [loadedImageEl, parserEngine, mlMasks, options.invert]);
+  }, [loadedImageEl, parserEngine, mlMasks, mlError, options.invert]);
 
   useEffect(() => {
     if (!loadedImageEl) return;
@@ -337,15 +359,18 @@ export const ImportModal: React.FC<ImportModalProps> = ({
       <div
         className="modal-card import-modal-card"
         onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="import-modal-title"
       >
         <div className="modal-header">
           <div>
-            <h3 className="modal-title">Generate Floorplan from Image</h3>
+            <h3 className="modal-title" id="import-modal-title">Generate Floorplan from Image</h3>
             <p className="import-subtitle">
               Upload a blueprint or floorplan image to automatically generate interactive walls, doors, and windows.
             </p>
           </div>
-          <button className="modal-close" onClick={onClose}>
+          <button type="button" className="modal-close" onClick={onClose} aria-label="Close">
             <X size={18} />
           </button>
         </div>
@@ -380,6 +405,15 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                     if (file) handleFileSelect(file);
                   }}
                   onClick={() => fileInputRef.current?.click()}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      fileInputRef.current?.click();
+                    }
+                  }}
+                  role="button"
+                  tabIndex={0}
+                  aria-label="Upload floorplan image"
                 >
                   <FileImage size={24} className="text-blue-600" />
                   <span className="dropzone-title">
@@ -466,7 +500,8 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                     {isRunningMl && parserEngine === 'ml' && (
                       <span className="text-xs text-blue-600 flex items-center gap-1">
                         <Loader2 size={12} className="spin" />
-                        Segmenting floorplan...
+                        Segmenting floorplan
+                        {mlBackend === 'webgpu' ? ' (GPU)' : mlBackend === 'wasm' ? ' (CPU, slower)' : ''}...
                       </span>
                     )}
                   </div>
@@ -476,7 +511,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                       className={`import-tab ${parserEngine === 'ml' ? 'active' : ''}`}
                       onClick={() => setParserEngine('ml')}
                     >
-                      <span>Neural Model (ConvNeXt-V2)</span>
+                      <span>Neural Model (ConvNeXt)</span>
                     </button>
                     <button
                       type="button"
@@ -496,6 +531,15 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                   />
                   <span>Invert blueprint colors (light lines on dark background)</span>
                 </label>
+
+                {parserEngine === 'ml' && mlError && (
+                  <div className="import-alert" role="status">
+                    <AlertCircle size={15} />
+                    <span>
+                      Neural model unavailable ({mlError}). Showing the Classic CV result instead.
+                    </span>
+                  </div>
+                )}
 
                 {isScanningOcr && (
                   <div className="text-xs text-slate-500 flex items-center gap-1.5 py-1">
@@ -661,11 +705,17 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                 <button
                   type="button"
                   className="btn-primary"
-                  disabled={!parseResult}
+                  disabled={!parseResult || (parserEngine === 'ml' && isRunningMl)}
                   onClick={handleApplyImport}
                 >
-                  <Check size={15} />
-                  <span>Generate Floorplan</span>
+                  {parserEngine === 'ml' && isRunningMl ? (
+                    <Loader2 size={15} className="spin" />
+                  ) : (
+                    <Check size={15} />
+                  )}
+                  <span>
+                    {parserEngine === 'ml' && isRunningMl ? 'Running model…' : 'Generate Floorplan'}
+                  </span>
                 </button>
               </div>
             </div>

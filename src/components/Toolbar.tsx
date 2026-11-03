@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import {
   MousePointer,
   Square,
@@ -7,9 +7,6 @@ import {
   Ruler,
   Hand,
   Magnet,
-  ZoomIn,
-  ZoomOut,
-  RotateCcw,
   Undo2,
   Redo2,
   Type,
@@ -24,9 +21,6 @@ interface ToolbarProps {
   setTool: (tool: ToolMode) => void;
   state: FloorplanState;
   setState: React.Dispatch<React.SetStateAction<FloorplanState>>;
-  zoom: number;
-  setZoom: React.Dispatch<React.SetStateAction<number>>;
-  setPan: React.Dispatch<React.SetStateAction<{ x: number; y: number }>>;
   setSelectedId: (id: string | null) => void;
   setSelectedIds?: (ids: string[]) => void;
   setSelectedType: (type: SelectedElementType) => void;
@@ -43,8 +37,6 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   setTool,
   state,
   setState,
-  setZoom,
-  setPan,
   setSelectedId,
   setSelectedIds,
   setSelectedType,
@@ -56,6 +48,26 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   canRedo,
 }) => {
   const [showImportHint, setShowImportHint] = useState(true);
+  const importBtnRef = useRef<HTMLButtonElement | null>(null);
+  const [calloutPos, setCalloutPos] = useState<{ top: number; left: number } | null>(null);
+
+  // The toolbar scrolls horizontally when it overflows, which would clip an
+  // absolutely-positioned callout, so it is position: fixed and anchored here.
+  useLayoutEffect(() => {
+    if (!showImportHint) return;
+    const update = () => {
+      // Mobile layout pins the callout via CSS (see App.css @media max-width: 860px).
+      if (window.matchMedia('(max-width: 860px)').matches) {
+        setCalloutPos(null);
+        return;
+      }
+      const rect = importBtnRef.current?.getBoundingClientRect();
+      if (rect) setCalloutPos({ top: rect.bottom + 12, left: rect.left + rect.width / 2 });
+    };
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, [showImportHint]);
 
   useEffect(() => {
     if (!showImportHint) return;
@@ -121,6 +133,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 
       <div className="import-btn-container">
         <button
+          ref={importBtnRef}
           className="tool-btn import-highlight-btn"
           onClick={onOpenImportModal}
           title="Import floorplan from image upload or website URL"
@@ -130,13 +143,14 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         </button>
 
         {showImportHint && (
-          <div
+          <button
+            type="button"
             className="import-indicator-callout"
+            style={calloutPos ? { top: calloutPos.top, left: calloutPos.left } : undefined}
             onClick={() => {
               setShowImportHint(false);
               onOpenImportModal();
             }}
-            role="tooltip"
           >
             <div className="import-indicator-arrow" />
             <div className="import-indicator-inner">
@@ -144,7 +158,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 Generate a floorplan from an image
               </div>
             </div>
-          </div>
+          </button>
         )}
       </div>
 
@@ -267,33 +281,6 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 
       <div className="divider-vertical" />
 
-      <div className="tool-group">
-        <button
-          className="tool-btn-icon"
-          onClick={() => setZoom((z) => Math.min(z * 1.2, 4.0))}
-          title="Zoom In"
-        >
-          <ZoomIn size={18} />
-        </button>
-        <button
-          className="tool-btn-icon"
-          onClick={() => setZoom((z) => Math.max(z * 0.8, 0.2))}
-          title="Zoom Out"
-        >
-          <ZoomOut size={18} />
-        </button>
-        <button
-          className="tool-btn-icon"
-          onClick={() => {
-            setZoom(1.0);
-            setPan({ x: 200, y: 150 });
-          }}
-          title="Reset View"
-        >
-          <RotateCcw size={16} />
-        </button>
-      </div>
-
       <div className="tool-group-right">
         <button
           type="button"
@@ -311,6 +298,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             className="tool-btn-icon"
             onClick={onOpenShortcuts}
             title="Keyboard shortcuts & guide"
+            aria-label="Keyboard shortcuts & guide"
           >
             <HelpCircle size={18} />
           </button>

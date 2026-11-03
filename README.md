@@ -4,7 +4,7 @@ m7w.ca/floorgan
 
 ## Model
 
-Floorgan uses a `ConvNeXt-Small + UNet` semantic segmentation model trained on the CubiCasa5K dataset to detect walls, windows, and doors directly in the browser via ONNX WebAssembly. The model's predictions are then traced into clean, editable walls and openings with automatic door swing detection and room scale estimation.
+Floorgan uses a `ConvNeXt-Small + UNet` semantic segmentation model trained on the CubiCasa5K dataset to detect walls, windows, and doors directly in the browser via ONNX Runtime Web (WebGPU with an FP16 model where available, otherwise WebAssembly with an INT8 model). The model's predictions are then traced into clean, editable walls and openings with automatic door swing detection and room scale estimation.
 
 ### Performance
 

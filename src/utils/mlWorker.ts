@@ -1,134 +1,216 @@
-import * as ort from 'onnxruntime-web';
+// ONNX Runtime lives only in this worker. Two backends:
+//  - WebGPU + FP16 model (fast path, ~0.25 s per pass on a laptop GPU)
+//  - WASM + dynamic-INT8 model (fallback when WebGPU is unavailable, fails or stalls)
+// Each ORT build is loaded lazily so a browser only downloads the one it uses.
+import type * as OrtTypes from 'onnxruntime-web';
 import {
   prepareModelInputTensor,
   logitsToSegmentationMasks,
+  fetchModelParts,
+  hasWebGpuAdapter,
   ML_MODEL_INPUT_SIZE,
-  DEFAULT_MODEL_URL,
+  CPU_MODEL_PART_URLS,
+  GPU_MODEL_PART_URLS,
+  type MlBackend,
 } from './mlSegmenter.ts';
 import type { ParseOptions, OcrTextBoxPx } from './floorplanParser.ts';
 
-ort.env.wasm.simd = 'relaxed';
+type Ort = typeof OrtTypes;
 
-const MODEL_CACHE_NAME = 'floorgan-models-v2';
-const MODEL_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const N = ML_MODEL_INPUT_SIZE;
 
-async function fetchModelWithCache(url: string): Promise<Uint8Array> {
-  if (typeof caches !== 'undefined') {
-    try {
-      const cache = await caches.open(MODEL_CACHE_NAME);
-      const cached = await cache.match(url);
-      if (cached) {
-        const cachedAt = cached.headers.get('x-floorgan-cached-at');
-        const isExpired = cachedAt && Date.now() - Number(cachedAt) > MODEL_CACHE_TTL_MS;
-        if (!isExpired) {
-          return new Uint8Array(await cached.arrayBuffer());
-        }
-        try {
-          const headResp = await fetch(url, { method: 'HEAD' });
-          const newEtag = headResp.headers.get('etag');
-          const oldEtag = cached.headers.get('etag');
-          if (newEtag && oldEtag && newEtag === oldEtag) {
-            const headers = new Headers(cached.headers);
-            headers.set('x-floorgan-cached-at', String(Date.now()));
-            const refreshed = new Response(cached.body, { headers });
-            await cache.put(url, refreshed.clone());
-            return new Uint8Array(await refreshed.arrayBuffer());
-          }
-        } catch {
-          return new Uint8Array(await cached.arrayBuffer());
-        }
-      }
-
-      const resp = await fetch(url);
-      if (!resp.ok) {
-        throw new Error(`Failed to fetch model ${url}: ${resp.status}`);
-      }
-      const data = await resp.arrayBuffer();
-      const headers = new Headers(resp.headers);
-      headers.set('x-floorgan-cached-at', String(Date.now()));
-      const toCache = new Response(data, { headers });
-      await cache.put(url, toCache);
-      return new Uint8Array(data);
-    } catch (err) {
-      console.warn('CacheStorage failed for model, falling back to network:', err);
-    }
-  }
-
-  const resp = await fetch(url);
-  if (!resp.ok) {
-    throw new Error(`Failed to fetch model ${url}: ${resp.status}`);
-  }
-  return new Uint8Array(await resp.arrayBuffer());
+interface LoadedSession {
+  ort: Ort;
+  session: OrtTypes.InferenceSession;
+  backend: MlBackend;
 }
 
-let cachedSession: ort.InferenceSession | null = null;
-let sessionPromise: Promise<ort.InferenceSession> | null = null;
-let isWebGpuSession = false;
+/** Budget for GPU setup steps (excludes downloads). On timeout we fall back to WASM. */
+const ADAPTER_TIMEOUT_MS = 5_000;
+const WEBGPU_SETUP_TIMEOUT_MS = 30_000;
 
-async function getOrInitSession(modelUrl = DEFAULT_MODEL_URL): Promise<ort.InferenceSession> {
-  if (cachedSession) return cachedSession;
-  if (sessionPromise) return sessionPromise;
+function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${what} timed out after ${ms} ms`)), ms);
+    promise.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      }
+    );
+  });
+}
 
-  sessionPromise = (async () => {
-    const canUseThreads =
-      typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated;
-    ort.env.wasm.numThreads = canUseThreads
-      ? Math.min(4, navigator.hardwareConcurrency || 2)
-      : 1;
+let loaded: LoadedSession | null = null;
+let loadingPromise: Promise<LoadedSession> | null = null;
 
-    const modelBuffer = await fetchModelWithCache(modelUrl);
+async function createWebGpuSession(): Promise<LoadedSession> {
+  // Aliased in vite.config.ts to ORT's "extern wasm" WebGPU build so the 26.8 MB
+  // runtime binary is not bundled into dist/ (Cloudflare's per-file limit is 25 MiB).
+  // It is loaded instead from jsDelivr, pinned to the exact installed ORT version
+  // (brotli-compressed to ~4.7 MB over the wire).
+  const ort = (await import('onnxruntime-web/webgpu')) as unknown as Ort;
+  const version = ort.env.versions.web ?? ort.env.versions.common;
+  const cdn = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${version}/dist/`;
+  ort.env.wasm.wasmPaths = {
+    mjs: `${cdn}ort-wasm-simd-threaded.asyncify.mjs`,
+    wasm: `${cdn}ort-wasm-simd-threaded.asyncify.wasm`,
+  };
 
-    // 1. Attempt hardware-accelerated WebGPU if available in worker scope
-    if (
-      typeof navigator !== 'undefined' &&
-      'gpu' in navigator &&
-      Boolean(navigator.gpu)
-    ) {
+  const model = await fetchModelParts(GPU_MODEL_PART_URLS);
+
+  // GPU setup normally takes 1-4 s, but some GPU/driver combinations stall
+  // indefinitely; bound it so the caller can fall back to WASM.
+  const session = await withTimeout(
+    (async () => {
+      const s = await ort.InferenceSession.create(model, {
+        executionProviders: ['webgpu'],
+        graphOptimizationLevel: 'all',
+      });
+      // The first WebGPU run compiles shaders (~2 s); do it now, while the import
+      // dialog is open, instead of on the user's first segmentation.
+      const dummy = new ort.Tensor('float32', new Float32Array(3 * N * N).fill(1), [1, 3, N, N]);
+      await s.run({ input_rgb: dummy });
+      return s;
+    })(),
+    WEBGPU_SETUP_TIMEOUT_MS,
+    'WebGPU session setup'
+  );
+
+  return { ort, session, backend: 'webgpu' };
+}
+
+async function createWasmSession(): Promise<LoadedSession> {
+  const ort = (await import('onnxruntime-web/wasm')) as unknown as Ort;
+  const canUseThreads = typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated;
+  ort.env.wasm.numThreads = canUseThreads ? Math.min(4, navigator.hardwareConcurrency || 2) : 1;
+
+  const model = await fetchModelParts(CPU_MODEL_PART_URLS);
+  const session = await ort.InferenceSession.create(model, {
+    executionProviders: ['wasm'],
+    graphOptimizationLevel: 'all',
+  });
+  return { ort, session, backend: 'wasm' };
+}
+
+async function getOrInitSession(): Promise<LoadedSession> {
+  if (loaded) return loaded;
+  if (loadingPromise) return loadingPromise;
+
+  loadingPromise = (async () => {
+    const gpuAvailable = await withTimeout(
+      hasWebGpuAdapter(),
+      ADAPTER_TIMEOUT_MS,
+      'WebGPU adapter request'
+    ).catch((err) => {
+      console.warn(err);
+      return false;
+    });
+    if (gpuAvailable) {
       try {
-        const session = await ort.InferenceSession.create(modelBuffer.buffer, {
-          executionProviders: ['webgpu'],
-          graphOptimizationLevel: 'all',
-        });
-        cachedSession = session;
-        isWebGpuSession = true;
-        return session;
+        loaded = await createWebGpuSession();
+        return loaded;
       } catch (err) {
-        console.warn('WebGPU execution provider failed in worker, falling back to WASM:', err);
+        console.warn('WebGPU session failed, falling back to WASM:', err);
       }
     }
-
-    // 2. Fallback to SIMD multi-threaded WASM
-    const session = await ort.InferenceSession.create(modelBuffer.buffer, {
-      executionProviders: ['wasm'],
-      graphOptimizationLevel: 'all',
-    });
-    cachedSession = session;
-    isWebGpuSession = false;
-    return session;
+    loaded = await createWasmSession();
+    return loaded;
   })();
 
   try {
-    return await sessionPromise;
+    return await loadingPromise;
   } catch (err) {
-    sessionPromise = null;
+    loadingPromise = null;
     throw err;
   }
 }
 
 async function releaseSession(): Promise<void> {
-  if (sessionPromise) {
+  if (loadingPromise) {
     try {
-      await sessionPromise;
+      await loadingPromise;
     } catch {}
   }
-  if (cachedSession) {
+  if (loaded) {
     try {
-      await cachedSession.release();
+      await loaded.session.release();
     } catch (err) {
       console.warn('Worker error releasing ONNX session:', err);
     }
-    cachedSession = null;
-    sessionPromise = null;
+    loaded = null;
+    loadingPromise = null;
+  }
+}
+
+async function runLogits(
+  { ort, session }: LoadedSession,
+  rgba: Uint8Array,
+  w: number,
+  h: number,
+  invert: boolean
+): Promise<Float32Array> {
+  const input = prepareModelInputTensor(rgba, w, h, N, invert);
+  const outputs = await session.run({
+    input_rgb: new ort.Tensor('float32', input, [1, 3, N, N]),
+  });
+  return (outputs.logits ?? Object.values(outputs)[0]).data as Float32Array;
+}
+
+/** Horizontally mirrors an RGBA image of size w×h. */
+function flipRgbaHorizontal(rgba: Uint8Array, w: number, h: number): Uint8Array {
+  const out = new Uint8Array(rgba.length);
+  for (let y = 0; y < h; y++) {
+    const row = y * w * 4;
+    for (let x = 0; x < w; x++) {
+      const s = row + x * 4;
+      const d = row + (w - 1 - x) * 4;
+      out[d] = rgba[s];
+      out[d + 1] = rgba[s + 1];
+      out[d + 2] = rgba[s + 2];
+      out[d + 3] = rgba[s + 3];
+    }
+  }
+  return out;
+}
+
+/**
+ * Logits for the image. On WebGPU (cheap) this averages the normal pass with a
+ * horizontally flipped pass (test-time augmentation); on WASM it is single-pass.
+ */
+async function segmentLogits(
+  s: LoadedSession,
+  rgba: Uint8Array,
+  w: number,
+  h: number,
+  invert: boolean
+): Promise<Float32Array> {
+  const logits = await runLogits(s, rgba, w, h, invert);
+  if (s.backend !== 'webgpu') return logits;
+
+  try {
+    const flipped = await runLogits(s, flipRgbaHorizontal(rgba, w, h), w, h, invert);
+    const planeSize = N * N;
+    const copyW = Math.min(w, N);
+    const copyH = Math.min(h, N);
+    const merged = new Float32Array(logits);
+    for (let c = 0; c < 4; c++) {
+      const cOff = c * planeSize;
+      for (let y = 0; y < copyH; y++) {
+        const row = cOff + y * N;
+        for (let x = 0; x < copyW; x++) {
+          merged[row + x] = (logits[row + x] + flipped[row + (copyW - 1 - x)]) * 0.5;
+        }
+      }
+    }
+    return merged;
+  } catch (err) {
+    console.warn('Flip TTA failed, using single pass:', err);
+    return logits;
   }
 }
 
@@ -141,92 +223,23 @@ self.onmessage = (e: MessageEvent) => {
     .then(async () => {
       try {
         if (type === 'WARM') {
-          await getOrInitSession(payload?.modelUrl);
-          self.postMessage({ id, type: 'WARMED' });
+          const s = await getOrInitSession();
+          self.postMessage({ id, type: 'WARMED', payload: { backend: s.backend } });
         } else if (type === 'RELEASE') {
           await releaseSession();
           self.postMessage({ id, type: 'RELEASED' });
         } else if (type === 'SEGMENT') {
-          const { rgba, w, h, options, ocrTextBoxes, modelUrl } = payload as {
+          const { rgba, w, h, options, ocrTextBoxes } = payload as {
             rgba: Uint8Array;
             w: number;
             h: number;
             options: ParseOptions;
             ocrTextBoxes: OcrTextBoxPx[];
-            modelUrl?: string;
           };
 
-          const session = await getOrInitSession(modelUrl);
-          const inputData = prepareModelInputTensor(rgba, w, h, ML_MODEL_INPUT_SIZE);
-          const inputTensor = new ort.Tensor('float32', inputData, [
-            1,
-            3,
-            ML_MODEL_INPUT_SIZE,
-            ML_MODEL_INPUT_SIZE,
-          ]);
-
-          const outputs = await session.run({ input_rgb: inputTensor });
-          const logitsTensor = outputs.logits ?? Object.values(outputs)[0];
-          let logitsData = logitsTensor.data as Float32Array;
-
-          // 2-Pass Horizontal Flip TTA on WebGPU (takes <180ms on GPU; skipped on WASM to keep CPU fast)
-          if (isWebGpuSession) {
-            try {
-              const flippedRgba = new Uint8Array(rgba.length);
-              for (let y = 0; y < h; y++) {
-                const row = y * w * 4;
-                for (let x = 0; x < w; x++) {
-                  const s = row + x * 4;
-                  const d = row + (w - 1 - x) * 4;
-                  flippedRgba[d] = rgba[s];
-                  flippedRgba[d + 1] = rgba[s + 1];
-                  flippedRgba[d + 2] = rgba[s + 2];
-                  flippedRgba[d + 3] = rgba[s + 3];
-                }
-              }
-
-              const flippedInput = prepareModelInputTensor(flippedRgba, w, h, ML_MODEL_INPUT_SIZE);
-              const flippedTensor = new ort.Tensor('float32', flippedInput, [
-                1,
-                3,
-                ML_MODEL_INPUT_SIZE,
-                ML_MODEL_INPUT_SIZE,
-              ]);
-              const out2 = await session.run({ input_rgb: flippedTensor });
-              const out2Data = (out2.logits ?? Object.values(out2)[0]).data as Float32Array;
-
-              const planeSize = ML_MODEL_INPUT_SIZE * ML_MODEL_INPUT_SIZE;
-              const copyW = Math.min(w, ML_MODEL_INPUT_SIZE);
-              const copyH = Math.min(h, ML_MODEL_INPUT_SIZE);
-
-              const merged = new Float32Array(logitsData.length);
-              merged.set(logitsData);
-              for (let c = 0; c < 4; c++) {
-                const cOff = c * planeSize;
-                for (let y = 0; y < copyH; y++) {
-                  const row = cOff + y * ML_MODEL_INPUT_SIZE;
-                  for (let x = 0; x < copyW; x++) {
-                    const idx1 = row + x;
-                    const idx2 = row + (copyW - 1 - x);
-                    merged[idx1] = (logitsData[idx1] + out2Data[idx2]) * 0.5;
-                  }
-                }
-              }
-              logitsData = merged;
-            } catch (ttaErr) {
-              console.warn('WebGPU 2-pass TTA fallback to single-pass:', ttaErr);
-            }
-          }
-
-          const masks = logitsToSegmentationMasks(
-            logitsData,
-            rgba,
-            w,
-            h,
-            options,
-            ocrTextBoxes,
-            ML_MODEL_INPUT_SIZE
-          );
+          const s = await getOrInitSession();
+          const logits = await segmentLogits(s, rgba, w, h, options.invert);
+          const masks = logitsToSegmentationMasks(logits, rgba, w, h, options, ocrTextBoxes, N);
 
           const transferables: Transferable[] = [
             masks.structuralMask.buffer,

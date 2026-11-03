@@ -24,6 +24,18 @@ jobs:
       - name: Build
         run: npm run build
 
+      # Cloudflare Pages rejects any single asset over 25 MiB, and that failure is
+      # only visible in the Cloudflare dashboard. Fail here instead.
+      - name: Check deploy asset sizes (Cloudflare 25 MiB limit)
+        run: |
+          oversized=$(find dist -type f -size +26214400c -exec ls -l {} \;)
+          if [ -n "$oversized" ]; then
+            echo "::error::Files exceed Cloudflare's 25 MiB per-file limit:"
+            echo "$oversized"
+            exit 1
+          fi
+          echo "All dist files are under 25 MiB."
+
       - name: Check for deploy token
         id: check-token
         run: |

@@ -38,6 +38,14 @@ interface Props {
   setPan: React.Dispatch<React.SetStateAction<Point>>;
   onStartInteraction?: () => void;
   onEndInteraction?: () => void;
+  /** Changing this value fits the plan to the viewport (also applied on mount). */
+  fitViewToken?: number;
+}
+
+/** True when a label rotated by `deg` would render upside down. */
+function isUpsideDown(deg: number): boolean {
+  const n = ((deg % 360) + 360) % 360;
+  return n > 90 && n <= 270;
 }
 
 function wrapTextBoxLines(text: string, fontSize: number, maxLineWidth: number): string[] {
@@ -87,6 +95,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
   setPan,
   onStartInteraction,
   onEndInteraction,
+  fitViewToken = 0,
 }) => {
   const svgRef = useRef<SVGSVGElement | null>(null);
 
@@ -216,6 +225,16 @@ export const FloorplanCanvas: React.FC<Props> = ({
     });
   }, [state.walls, state.furniture, state.doors, state.measurements, setZoom, setPan]);
 
+  const fitFloorplanToViewRef = useRef(fitFloorplanToView);
+  fitFloorplanToViewRef.current = fitFloorplanToView;
+
+  // Fit on first render (so phones don't start on a desktop-sized pan/zoom) and
+  // whenever the parent requests it (e.g. after importing a plan).
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => fitFloorplanToViewRef.current());
+    return () => cancelAnimationFrame(raf);
+  }, [fitViewToken]);
+
   // Mouse wheel zoom (attached with { passive: false } so preventDefault works without console warnings)
   useEffect(() => {
     const svgEl = svgRef.current;
@@ -224,7 +243,11 @@ export const FloorplanCanvas: React.FC<Props> = ({
     const handleNativeWheel = (e: WheelEvent) => {
       e.preventDefault();
       const currentZoom = zoomRef.current;
-      const zoomFactor = e.deltaY < 0 ? 1.12 : 0.88;
+      // Scale by scroll distance so trackpads (many small deltas) and mouse
+      // wheels (few large deltas) zoom at a similar rate. ~100px ≈ 12%.
+      const deltaPx = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY;
+      const clamped = Math.max(-100, Math.min(100, deltaPx));
+      const zoomFactor = Math.exp(-clamped * 0.0012);
       const newZoom = Math.min(Math.max(currentZoom * zoomFactor, 0.15), 5.0);
 
       const rect = svgEl.getBoundingClientRect();
@@ -243,6 +266,9 @@ export const FloorplanCanvas: React.FC<Props> = ({
       svgEl.removeEventListener('wheel', handleNativeWheel);
     };
   }, [setZoom, setPan]);
+
+  const onEndInteractionRef = useRef(onEndInteraction);
+  onEndInteractionRef.current = onEndInteraction;
 
   // Touch gestures: Pinch-to-zoom and two-finger pan
   useEffect(() => {
@@ -265,7 +291,11 @@ export const FloorplanCanvas: React.FC<Props> = ({
         setSelectionBox(null);
         setIsPanning(false);
         setIsDragging(false);
+        setIsRotating(false);
         setResizeTarget(null);
+        // A drag/resize/rotate may have called onStartInteraction; close it so the
+        // history hook doesn't stay in "interaction" mode and swallow later edits.
+        onEndInteractionRef.current?.();
 
         if (e.touches.length === 2) {
           const t1 = e.touches[0];
@@ -1319,9 +1349,13 @@ export const FloorplanCanvas: React.FC<Props> = ({
     };
     window.addEventListener('pointermove', onWindowPointerMove);
     window.addEventListener('pointerup', onWindowPointerUp);
+    // pointercancel fires when the browser/OS takes over the gesture; without it
+    // the drag state (and the undo-history interaction) would never be closed.
+    window.addEventListener('pointercancel', onWindowPointerUp);
     return () => {
       window.removeEventListener('pointermove', onWindowPointerMove);
       window.removeEventListener('pointerup', onWindowPointerUp);
+      window.removeEventListener('pointercancel', onWindowPointerUp);
     };
   }, [isDragging, resizeTarget, isRotating, isPanning, selectionBox]);
 
@@ -1418,11 +1452,16 @@ export const FloorplanCanvas: React.FC<Props> = ({
       }
     };
 
+    // If the window loses focus while Space is held, keyup never arrives.
+    const handleBlur = () => setIsSpacePressed(false);
+
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', handleBlur);
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('blur', handleBlur);
     };
   }, [selectedId, selectedIds, selectedType, setState, setSelectedId, setSelectedIds, setSelectedType, setTool, setPan]);
 
@@ -2215,6 +2254,8 @@ export const FloorplanCanvas: React.FC<Props> = ({
                     <text
                       x="0"
                       y="4"
+                      // Keep labels upright: flip text when the item is rotated past 90°.
+                      transform={isUpsideDown(item.rotation) ? 'rotate(180)' : undefined}
                       textAnchor="middle"
                       dominantBaseline="central"
                       fontSize={Math.min(11, Math.max(8, item.width / 9))}
