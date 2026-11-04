@@ -1,15 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import {
-  X,
-  Upload,
-  Globe,
-  Check,
-  Eye,
-  Layers,
-  AlertCircle,
-  Loader2,
-  FileImage,
-} from 'lucide-react';
+import { X, Globe, Check, AlertCircle, Loader2, FileImage } from 'lucide-react';
 import { FloorplanState } from '../types';
 import {
   MAX_PROC_DIM,
@@ -53,7 +43,6 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   state,
   onImport,
 }) => {
-  const [activeTab, setActiveTab] = useState<'upload' | 'url'>('upload');
   const [imageDataUrl, setImageDataUrl] = useState<string | null>(null);
   const [loadedImageEl, setLoadedImageEl] = useState<HTMLImageElement | null>(null);
 
@@ -62,6 +51,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   const [urlError, setUrlError] = useState<string | null>(null);
   const [urlCandidates, setUrlCandidates] = useState<{ url: string; label: string }[]>([]);
 
+  // Set automatically from the image (dark blueprints); there is no manual toggle.
   const [invertColors, setInvertColors] = useState<boolean>(false);
   const options = React.useMemo<ParseOptions>(
     () => ({ ...DEFAULT_PARSE_OPTIONS, invert: invertColors }),
@@ -72,13 +62,11 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   const [ocrTextBoxes, setOcrTextBoxes] = useState<OcrTextBoxPx[]>([]);
   const [isScanningOcr, setIsScanningOcr] = useState<boolean>(false);
   const [useOcrScale, setUseOcrScale] = useState<boolean>(true);
-  const [parserEngine, setParserEngine] = useState<'ml' | 'otsu'>('ml');
   const [mlMasks, setMlMasks] = useState<SegmentationMasks | null>(null);
   const [isRunningMl, setIsRunningMl] = useState<boolean>(false);
   const [mlError, setMlError] = useState<string | null>(null);
   const [mlBackend, setMlBackend] = useState<MlBackend | null>(null);
   const [parseResult, setParseResult] = useState<ParseResult | null>(null);
-  const [previewMode, setPreviewMode] = useState<'overlay' | 'mask'>('overlay');
   const [includeUnderlay, setIncludeUnderlay] = useState<boolean>(true);
   const [keepExistingFurniture, setKeepExistingFurniture] = useState<boolean>(false);
 
@@ -93,12 +81,42 @@ export const ImportModal: React.FC<ImportModalProps> = ({
 
   const handleFileSelect = (file: File) => {
     setUrlError(null);
+    setUrlCandidates([]);
     const reader = new FileReader();
     reader.onload = (e) => {
       setImageDataUrl(e.target?.result as string);
     };
     reader.readAsDataURL(file);
   };
+
+  const fetchFromUrl = async (rawUrl: string) => {
+    const url = rawUrl.trim();
+    if (!url) return;
+    setIsLoadingUrl(true);
+    setUrlError(null);
+    setUrlCandidates([]);
+
+    try {
+      const result = await fetchFloorplanFromUrl(url);
+      if (result.candidates.length > 0) {
+        setUrlCandidates(result.candidates);
+      }
+      if (result.primaryDataUrl) {
+        setImageDataUrl(result.primaryDataUrl);
+      } else if (result.candidates.length > 0) {
+        const dataUrl = await fetchImageUrlAsDataUrl(result.candidates[0].url);
+        setImageDataUrl(dataUrl);
+      }
+    } catch (err: unknown) {
+      setUrlError(err instanceof Error ? err.message : 'Failed to fetch floorplan from URL.');
+    } finally {
+      setIsLoadingUrl(false);
+    }
+  };
+
+  // The paste listener is registered once per open; read the latest closure through a ref.
+  const fetchFromUrlRef = useRef(fetchFromUrl);
+  fetchFromUrlRef.current = fetchFromUrl;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -110,10 +128,21 @@ export const ImportModal: React.FC<ImportModalProps> = ({
         if (items[i].type.startsWith('image/')) {
           const file = items[i].getAsFile();
           if (file) {
+            e.preventDefault();
             handleFileSelect(file);
-            break;
+            return;
           }
         }
+      }
+
+      // A link pasted anywhere outside a text field is fetched directly.
+      const target = e.target as HTMLElement | null;
+      if (target?.closest('input, textarea, [contenteditable="true"]')) return;
+      const text = e.clipboardData?.getData('text/plain')?.trim() ?? '';
+      if (/^https?:\/\/\S+$/i.test(text)) {
+        e.preventDefault();
+        setUrlInput(text);
+        fetchFromUrlRef.current(text);
       }
     };
 
@@ -218,7 +247,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   }, [loadedImageEl, options.invert]);
 
   useEffect(() => {
-    if (!loadedImageEl || parserEngine !== 'ml') {
+    if (!loadedImageEl) {
       setIsRunningMl(false);
       return;
     }
@@ -270,12 +299,13 @@ export const ImportModal: React.FC<ImportModalProps> = ({
           setIsRunningMl(false);
         }
       });
-  }, [loadedImageEl, parserEngine, mlMasks, mlError, options.invert]);
+  }, [loadedImageEl, mlMasks, mlError, options.invert]);
 
+  // Classic CV is used only as an automatic fallback when the model fails.
   useEffect(() => {
     if (!loadedImageEl) return;
     // On the GPU the ML masks arrive within a second; skip the interim non-ML parse.
-    if (parserEngine === 'ml' && !mlMasks && !mlError && mlBackend === 'webgpu') {
+    if (!mlMasks && !mlError && mlBackend === 'webgpu') {
       setParseResult(null);
       return;
     }
@@ -286,36 +316,16 @@ export const ImportModal: React.FC<ImportModalProps> = ({
       useOcrScale,
       roomCandidates,
       ocrTextBoxes,
-      parserEngine === 'ml' && mlMasks ? mlMasks : undefined
+      mlMasks ?? undefined
     );
     setParseResult(res);
-  }, [loadedImageEl, options, ocrCandidates, useOcrScale, roomCandidates, ocrTextBoxes, parserEngine, mlMasks, mlError, mlBackend]);
+  }, [loadedImageEl, options, ocrCandidates, useOcrScale, roomCandidates, ocrTextBoxes, mlMasks, mlError, mlBackend]);
 
   if (!isOpen) return null;
 
-  const handleFetchUrl = async (e: React.FormEvent) => {
+  const handleFetchUrl = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!urlInput.trim()) return;
-    setIsLoadingUrl(true);
-    setUrlError(null);
-    setUrlCandidates([]);
-
-    try {
-      const result = await fetchFloorplanFromUrl(urlInput);
-      if (result.candidates.length > 0) {
-        setUrlCandidates(result.candidates);
-      }
-      if (result.primaryDataUrl) {
-        setImageDataUrl(result.primaryDataUrl);
-      } else if (result.candidates.length > 0) {
-        const dataUrl = await fetchImageUrlAsDataUrl(result.candidates[0].url);
-        setImageDataUrl(dataUrl);
-      }
-    } catch (err: unknown) {
-      setUrlError(err instanceof Error ? err.message : 'Failed to fetch floorplan from URL.');
-    } finally {
-      setIsLoadingUrl(false);
-    }
+    fetchFromUrl(urlInput);
   };
 
   const handleSelectCandidate = async (candidateUrl: string) => {
@@ -333,6 +343,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
 
   const handleLoadSample = () => {
     setUrlError(null);
+    setUrlCandidates([]);
     const sampleUrl = createSampleBlueprintDataUrl();
     setImageDataUrl(sampleUrl);
   };
@@ -367,9 +378,10 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     onClose();
   };
 
-  const mlBusy = parserEngine === 'ml' && isRunningMl;
-  const isBusy = mlBusy || isScanningOcr;
-  const busyLabel = mlBusy
+  const hasExistingFurniture =
+    state.furniture.length > 0 || (state.textBoxes?.length ?? 0) > 0;
+  const isBusy = isRunningMl || isScanningOcr;
+  const busyLabel = isRunningMl
     ? mlBackend
       ? 'Running model…'
       : 'Loading model…'
@@ -389,9 +401,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
         <div className="modal-header">
           <div>
             <h3 className="modal-title" id="import-modal-title">Generate Floorplan from Image</h3>
-            <p className="import-subtitle">
-              Upload a blueprint or floorplan image to automatically generate interactive walls, doors, and windows.
-            </p>
+            <p className="import-subtitle">Turn a floorplan image into editable walls, doors, and windows.</p>
           </div>
           <button type="button" className="modal-close" onClick={onClose} aria-label="Close">
             <X size={18} />
@@ -400,113 +410,91 @@ export const ImportModal: React.FC<ImportModalProps> = ({
 
         <div className="import-modal-body">
           <div className="import-controls-col">
-            <div className="import-tabs">
-              <button
-                className={`import-tab ${activeTab === 'upload' ? 'active' : ''}`}
-                onClick={() => setActiveTab('upload')}
-              >
-                <Upload size={14} />
-                <span>Upload / Paste Image</span>
-              </button>
-              <button
-                className={`import-tab ${activeTab === 'url' ? 'active' : ''}`}
-                onClick={() => setActiveTab('url')}
-              >
-                <Globe size={14} />
-                <span>Website Link (URL)</span>
-              </button>
-            </div>
-
-            {activeTab === 'upload' && (
-              <div className="import-source-box">
-                <div
-                  className="dropzone"
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={(e) => {
+            <div className="import-source-box">
+              <div
+                className="dropzone"
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const file = e.dataTransfer.files?.[0];
+                  if (file) handleFileSelect(file);
+                }}
+                onClick={() => fileInputRef.current?.click()}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
-                    const file = e.dataTransfer.files?.[0];
+                    fileInputRef.current?.click();
+                  }
+                }}
+                role="button"
+                tabIndex={0}
+                aria-label="Upload floorplan image"
+              >
+                <FileImage size={24} className="text-blue-600" />
+                <span className="dropzone-title">Drop, paste, or click to upload</span>
+                <span className="dropzone-sub">PNG, JPG, WEBP, or SVG</span>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
                     if (file) handleFileSelect(file);
+                    e.target.value = '';
                   }}
-                  onClick={() => fileInputRef.current?.click()}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      fileInputRef.current?.click();
-                    }
-                  }}
-                  role="button"
-                  tabIndex={0}
-                  aria-label="Upload floorplan image"
-                >
-                  <FileImage size={24} className="text-blue-600" />
-                  <span className="dropzone-title">
-                    Click to upload or drag and drop
-                  </span>
-                  <span className="dropzone-sub">PNG, JPG, WEBP, or SVG floorplan</span>
+                />
+              </div>
+
+              <div className="import-or-divider" aria-hidden="true">
+                <span>or paste a link</span>
+              </div>
+
+              <form onSubmit={handleFetchUrl} className="url-form">
+                <div className="url-input-wrap">
+                  <Globe size={13} className="url-input-icon" />
                   <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    style={{ display: 'none' }}
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) handleFileSelect(file);
-                    }}
+                    type="url"
+                    inputMode="url"
+                    placeholder="Image or listing page URL"
+                    aria-label="Floorplan image or listing page URL"
+                    value={urlInput}
+                    onChange={(e) => setUrlInput(e.target.value)}
+                    className="field-input url-input"
                   />
                 </div>
                 <button
-                  type="button"
-                  className="btn-secondary w-full mt-2"
-                  onClick={handleLoadSample}
+                  type="submit"
+                  className="btn-primary"
+                  disabled={isLoadingUrl || !urlInput.trim()}
                 >
-                  <Layers size={14} />
-                  <span>Load Sample Blueprint Image to Test</span>
+                  {isLoadingUrl ? <Loader2 size={14} className="spin" /> : 'Fetch'}
                 </button>
-              </div>
-            )}
+              </form>
 
-            {activeTab === 'url' && (
-              <div className="import-source-box">
-                <form onSubmit={handleFetchUrl} className="url-form">
-                  <input
-                    type="text"
-                    placeholder="https://example.com/floorplan.png or listing page URL..."
-                    value={urlInput}
-                    onChange={(e) => setUrlInput(e.target.value)}
-                    className="field-input flex-1"
-                  />
-                  <button
-                    type="submit"
-                    className="btn-primary"
-                    disabled={isLoadingUrl || !urlInput.trim()}
-                  >
-                    {isLoadingUrl ? <Loader2 size={14} className="spin" /> : 'Fetch'}
-                  </button>
-                </form>
-                <span className="url-hint">
-                  Supports direct image links (.png, .jpg, .webp) or listing webpages with embedded floorplans.
-                </span>
-
-                {urlCandidates.length > 1 && (
-                  <div className="candidates-list">
-                    <span className="field-label">Extracted Images on Page:</span>
-                    <div className="candidates-chips">
-                      {urlCandidates.map((cand, idx) => (
-                        <button
-                          key={idx}
-                          type="button"
-                          className="chip-btn"
-                          onClick={() => handleSelectCandidate(cand.url)}
-                          title={cand.url}
-                        >
-                          #{idx + 1} {cand.label.slice(0, 26)}
-                        </button>
-                      ))}
-                    </div>
+              {urlCandidates.length > 1 && (
+                <div className="candidates-list">
+                  <span className="field-label">Images found on page:</span>
+                  <div className="candidates-chips">
+                    {urlCandidates.map((cand, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        className="chip-btn"
+                        onClick={() => handleSelectCandidate(cand.url)}
+                        title={cand.url}
+                      >
+                        #{idx + 1} {cand.label.slice(0, 26)}
+                      </button>
+                    ))}
                   </div>
-                )}
-              </div>
-            )}
+                </div>
+              )}
+
+              <button type="button" className="import-sample-link" onClick={handleLoadSample}>
+                No floorplan handy? Try a sample
+              </button>
+            </div>
 
             {urlError && (
               <div className="import-alert">
@@ -517,49 +505,11 @@ export const ImportModal: React.FC<ImportModalProps> = ({
 
             {imageDataUrl && (
               <div className="import-config-card">
-                <div className="field-group mb-2">
-                  <div className="flex justify-between items-center mb-1">
-                    <label className="field-label">Parser Engine</label>
-                    {isRunningMl && parserEngine === 'ml' && (
-                      <span className="text-xs text-blue-600 flex items-center gap-1">
-                        <Loader2 size={12} className="spin" />
-                        {mlBackend ? 'Segmenting floorplan' : 'Loading model'}
-                        {mlBackend === 'webgpu' ? ' (GPU)' : mlBackend === 'wasm' ? ' (CPU, slower)' : ''}...
-                      </span>
-                    )}
-                  </div>
-                  <div className="import-tabs">
-                    <button
-                      type="button"
-                      className={`import-tab ${parserEngine === 'ml' ? 'active' : ''}`}
-                      onClick={() => setParserEngine('ml')}
-                    >
-                      <span>Neural Model (ConvNeXt)</span>
-                    </button>
-                    <button
-                      type="button"
-                      className={`import-tab ${parserEngine === 'otsu' ? 'active' : ''}`}
-                      onClick={() => setParserEngine('otsu')}
-                    >
-                      <span>Classic CV (Otsu)</span>
-                    </button>
-                  </div>
-                </div>
-
-                <label className="checkbox-row" style={{ marginTop: '0.25rem', marginBottom: '0.25rem' }}>
-                  <input
-                    type="checkbox"
-                    checked={invertColors}
-                    onChange={(e) => setInvertColors(e.target.checked)}
-                  />
-                  <span>Invert blueprint colors (light lines on dark background)</span>
-                </label>
-
-                {parserEngine === 'ml' && mlError && (
+                {mlError && (
                   <div className="import-alert" role="status">
                     <AlertCircle size={15} />
                     <span>
-                      Neural model unavailable ({mlError}). Showing the Classic CV result instead.
+                      The AI model couldn't run on this device, so a simpler detector was used. Results may need more cleanup.
                     </span>
                   </div>
                 )}
@@ -594,54 +544,35 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                     <span>Keep image as background reference underlay</span>
                   </label>
 
-                  <label className="checkbox-row">
-                    <input
-                      type="checkbox"
-                      checked={keepExistingFurniture}
-                      onChange={(e) => setKeepExistingFurniture(e.target.checked)}
-                    />
-                    <span>Keep current furniture on canvas</span>
-                  </label>
+                  {hasExistingFurniture && (
+                    <label className="checkbox-row">
+                      <input
+                        type="checkbox"
+                        checked={keepExistingFurniture}
+                        onChange={(e) => setKeepExistingFurniture(e.target.checked)}
+                      />
+                      <span>Keep current furniture on canvas</span>
+                    </label>
+                  )}
                 </div>
               </div>
             )}
           </div>
 
           <div className="import-preview-col">
-            <div className="preview-toolbar">
-              <div className="segmented-control">
-                <button
-                  type="button"
-                  className={`segment-btn ${previewMode === 'overlay' ? 'active' : ''}`}
-                  onClick={() => setPreviewMode('overlay')}
-                >
-                  <Eye size={12} style={{ display: 'inline', marginRight: 4 }} />
-                  Vector Overlay
-                </button>
-                <button
-                  type="button"
-                  className={`segment-btn ${previewMode === 'mask' ? 'active' : ''}`}
-                  onClick={() => setPreviewMode('mask')}
-                >
-                  <Layers size={12} style={{ display: 'inline', marginRight: 4 }} />
-                  Isolated Wall Mask
-                </button>
-              </div>
-
-              {parseResult && (
-                <div className="preview-badges">
-                  <span className="preview-badge">{parseResult.walls.length} Walls</span>
-                  <span className="preview-badge">{parseResult.doors.length} Doors</span>
-                  <span className="preview-badge">{parseResult.windows.length} Windows</span>
-                </div>
-              )}
-            </div>
-
             <div className="preview-stage">
-              {!imageDataUrl || !parseResult ? (
+              {!imageDataUrl ? (
                 <div className="preview-empty">
                   <FileImage size={36} className="text-slate-300" />
-                  <p>Upload a floorplan image, paste a link, or click "Load Sample Blueprint"</p>
+                  <p>Your floorplan preview will appear here</p>
+                </div>
+              ) : !parseResult ? (
+                <div className="preview-pending">
+                  <img src={imageDataUrl} alt="" className="preview-pending-img" />
+                  <div className="preview-pending-status" role="status">
+                    <Loader2 size={14} className="spin" />
+                    <span>{busyLabel ?? 'Detecting walls…'}</span>
+                  </div>
                 </div>
               ) : (
                 <svg
@@ -652,14 +583,12 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                   preserveAspectRatio="xMidYMid meet"
                 >
                   <image
-                    href={
-                      previewMode === 'mask' ? parseResult.maskPreviewDataUrl : imageDataUrl
-                    }
+                    href={imageDataUrl}
                     x={parseResult.originOffset.x}
                     y={parseResult.originOffset.y}
                     width={parseResult.boundsCm.width}
                     height={parseResult.boundsCm.height}
-                    opacity={previewMode === 'overlay' ? 0.35 : 0.9}
+                    opacity={0.35}
                     preserveAspectRatio="none"
                   />
 
@@ -718,9 +647,6 @@ export const ImportModal: React.FC<ImportModalProps> = ({
             </div>
 
             <div className="preview-footer">
-              <span className="text-xs text-slate-500">
-                Tip: Generated walls, doors, and windows can be resized, moved, or deleted on the canvas.
-              </span>
               <div className="flex gap-2">
                 <button type="button" className="btn-secondary" onClick={onClose}>
                   Cancel

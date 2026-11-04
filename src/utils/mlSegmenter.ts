@@ -137,11 +137,6 @@ export async function purgeStaleModelCaches(): Promise<void> {
   );
 }
 
-// Only purges old caches; models load on import intent (see prewarmImportPipeline).
-export async function prewarmModelCache(): Promise<void> {
-  await purgeStaleModelCaches();
-}
-
 export function prepareModelInputTensor(
   rgba: Uint8ClampedArray | Uint8Array,
   w: number,

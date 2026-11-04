@@ -3290,7 +3290,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
             1 Grid Cell = <strong>{formatDimension(state.gridSize, state.unit)} × {formatDimension(state.gridSize, state.unit)}</strong>
           </span>
           <span className="grid-hud-sub">
-            Snap: <span className={state.gridSnap ? 'text-emerald-600 font-semibold' : 'text-slate-400'}>{state.gridSnap ? 'Active' : 'Off'}</span> (Zoom {Math.round(zoom * 100)}%)
+            Zoom {Math.round(zoom * 100)}%
           </span>
         </div>
       </div>

@@ -151,9 +151,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     <aside className={`sidebar ${className}`}>
       <div className="sidebar-header">
         <div className="sidebar-header-left">
-          <h2 className="sidebar-title">Furniture Catalog</h2>
-          <span className="sidebar-badge">{filteredItems.length} items</span>
-        </div>
+          <h2 className="sidebar-title">Furniture Catalog</h2>        </div>
         {onClose && (
           <button
             type="button"

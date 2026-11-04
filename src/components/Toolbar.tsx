@@ -3,7 +3,6 @@ import {
   MousePointer,
   Square,
   DoorOpen,
-  AppWindow,
   Ruler,
   Hand,
   Magnet,
@@ -15,6 +14,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { FloorplanState, SelectedElementType, ToolMode, Unit } from '../types';
+import { WindowIcon } from './icons/WindowIcon';
 
 interface ToolbarProps {
   tool: ToolMode;
@@ -204,7 +204,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           onClick={() => setTool('window')}
           title="Draw Window (4) — Click or drag along wall to draft window opening"
         >
-          <AppWindow size={18} />
+          <WindowIcon size={18} />
           <span>Window</span>
         </button>
 
