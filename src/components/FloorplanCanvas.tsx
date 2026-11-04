@@ -42,7 +42,6 @@ interface Props {
   fitViewToken?: number;
 }
 
-/** True when a label rotated by `deg` would render upside down. */
 function isUpsideDown(deg: number): boolean {
   const n = ((deg % 360) + 360) % 360;
   return n > 90 && n <= 270;
@@ -228,14 +227,13 @@ export const FloorplanCanvas: React.FC<Props> = ({
   const fitFloorplanToViewRef = useRef(fitFloorplanToView);
   fitFloorplanToViewRef.current = fitFloorplanToView;
 
-  // Fit on first render (so phones don't start on a desktop-sized pan/zoom) and
-  // whenever the parent requests it (e.g. after importing a plan).
+  // Fit on mount (so phones don't start at a desktop-sized zoom) and whenever the parent asks.
   useEffect(() => {
     const raf = requestAnimationFrame(() => fitFloorplanToViewRef.current());
     return () => cancelAnimationFrame(raf);
   }, [fitViewToken]);
 
-  // Mouse wheel zoom (attached with { passive: false } so preventDefault works without console warnings)
+  // Attached manually with { passive: false } so preventDefault works.
   useEffect(() => {
     const svgEl = svgRef.current;
     if (!svgEl) return;
@@ -243,8 +241,8 @@ export const FloorplanCanvas: React.FC<Props> = ({
     const handleNativeWheel = (e: WheelEvent) => {
       e.preventDefault();
       const currentZoom = zoomRef.current;
-      // Scale by scroll distance so trackpads (many small deltas) and mouse
-      // wheels (few large deltas) zoom at a similar rate. ~100px ≈ 12%.
+      // Scale by scroll distance so trackpads (many small deltas) and mouse wheels
+      // (few large ones) zoom at a similar rate.
       const deltaPx = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY;
       const clamped = Math.max(-100, Math.min(100, deltaPx));
       const zoomFactor = Math.exp(-clamped * 0.0012);
@@ -270,7 +268,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
   const onEndInteractionRef = useRef(onEndInteraction);
   onEndInteractionRef.current = onEndInteraction;
 
-  // Touch gestures: Pinch-to-zoom and two-finger pan
   useEffect(() => {
     const svgEl = svgRef.current;
     if (!svgEl) return;
@@ -293,8 +290,8 @@ export const FloorplanCanvas: React.FC<Props> = ({
         setIsDragging(false);
         setIsRotating(false);
         setResizeTarget(null);
-        // A drag/resize/rotate may have called onStartInteraction; close it so the
-        // history hook doesn't stay in "interaction" mode and swallow later edits.
+        // Close any drag the gesture started, or the history hook stays in
+        // interaction mode and swallows later edits.
         onEndInteractionRef.current?.();
 
         if (e.touches.length === 2) {
@@ -328,9 +325,7 @@ export const FloorplanCanvas: React.FC<Props> = ({
         const curMidX = (t1.clientX + t2.clientX) / 2 - rect.left;
         const curMidY = (t1.clientY + t2.clientY) / 2 - rect.top;
 
-        // Scale ratio: moving fingers apart zooms in, together zooms out
         const rawScale = dist / gesture.initialDist;
-        // Responsive curve: smaller pinch covers more range naturally on mobile screens
         const scale = Math.pow(rawScale, 1.25);
         const newZoom = Math.min(Math.max(gesture.initialZoom * scale, 0.15), 5.0);
 
@@ -366,7 +361,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
   }, [setZoom, setPan]);
 
   const handlePointerDown = (e: React.PointerEvent) => {
-    // Double-tap to zoom in/out on mobile
     if (e.pointerType === 'touch' && !isDragging && !resizeTarget && (tool === 'select' || tool === 'pan')) {
       const now = Date.now();
       const timeDelta = now - lastTapRef.current.time;
@@ -1349,8 +1343,8 @@ export const FloorplanCanvas: React.FC<Props> = ({
     };
     window.addEventListener('pointermove', onWindowPointerMove);
     window.addEventListener('pointerup', onWindowPointerUp);
-    // pointercancel fires when the browser/OS takes over the gesture; without it
-    // the drag state (and the undo-history interaction) would never be closed.
+    // pointercancel fires when the OS takes over the gesture; without it the drag
+    // and its history interaction never close.
     window.addEventListener('pointercancel', onWindowPointerUp);
     return () => {
       window.removeEventListener('pointermove', onWindowPointerMove);
@@ -2254,7 +2248,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                     <text
                       x="0"
                       y="4"
-                      // Keep labels upright: flip text when the item is rotated past 90°.
                       transform={isUpsideDown(item.rotation) ? 'rotate(180)' : undefined}
                       textAnchor="middle"
                       dominantBaseline="central"
@@ -3047,7 +3040,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   strokeWidth={isSelected ? '3' : '2'}
                   strokeDasharray="6 3"
                 />
-                {/* Start handle hit target */}
                 <circle
                   cx={m.start.x}
                   cy={m.start.y}
@@ -3074,7 +3066,6 @@ export const FloorplanCanvas: React.FC<Props> = ({
                   className={isSelected ? 'active:scale-125 transition-transform' : ''}
                   style={{ pointerEvents: 'none' }}
                 />
-                {/* End handle hit target */}
                 <circle
                   cx={m.end.x}
                   cy={m.end.y}

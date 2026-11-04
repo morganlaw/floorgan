@@ -1,12 +1,9 @@
-// ONNX Runtime lives only in this worker.
-// Try WebGPU (FP16 model) if available; on any error or timeout fall back to the CPU
-// (WASM, INT8 model). Each ORT build is loaded lazily, so a browser only downloads
-// what it uses.
 import type * as OrtTypes from 'onnxruntime-web';
 import {
   prepareModelInputTensor,
   logitsToSegmentationMasks,
   fetchModelParts,
+  withTimeout,
   ML_MODEL_INPUT_SIZE,
   CPU_MODEL_PART_URLS,
   GPU_MODEL_PART_URLS,
@@ -24,58 +21,63 @@ interface LoadedSession {
   backend: MlBackend;
 }
 
-/**
- * WebGPU setup (session creation + shader warm-up) normally takes 2-4 s. On some
- * GPU/driver combinations it hangs instead of throwing, so it gets a time limit.
- */
+// Some GPU/driver combinations hang here instead of throwing.
 const WEBGPU_SETUP_TIMEOUT_MS = 15_000;
 
-function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`${what} timed out after ${ms} ms`)), ms);
-    promise.then(
-      (v) => {
-        clearTimeout(timer);
-        resolve(v);
-      },
-      (e) => {
-        clearTimeout(timer);
-        reject(e);
-      }
+async function timed<T>(label: string, fn: () => Promise<T>): Promise<T> {
+  const start = performance.now();
+  const result = await fn();
+  console.debug(`[ml] ${label}: ${Math.round(performance.now() - start)} ms`);
+  return result;
+}
+
+type GpuAdapterLike = { features: { has(name: string): boolean } };
+type GpuLike = { requestAdapter(options?: object): Promise<GpuAdapterLike | null> };
+
+async function canUseWebGpu(): Promise<boolean> {
+  const gpu = (navigator as { gpu?: GpuLike }).gpu;
+  if (!gpu) return false;
+  try {
+    const adapter = await withTimeout(
+      gpu.requestAdapter({ powerPreference: 'low-power' }),
+      5_000,
+      'WebGPU adapter request'
     );
-  });
+    return !!adapter?.features.has('shader-f16');
+  } catch (err) {
+    console.warn(err);
+    return false;
+  }
 }
 
 let loaded: LoadedSession | null = null;
 let loadingPromise: Promise<LoadedSession> | null = null;
 
 async function createWebGpuSession(): Promise<LoadedSession> {
-  // Aliased in vite.config.ts to ORT's "extern wasm" WebGPU build so its 26.8 MB
-  // runtime binary isn't bundled into dist/ (Cloudflare's per-file limit is 25 MiB);
-  // it loads from jsDelivr, pinned to the installed ORT version.
+  // The runtime wasm is too big for Cloudflare (see vite.config.ts); load it from jsDelivr.
   const ort = (await import('onnxruntime-web/webgpu')) as unknown as Ort;
   const cdn = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ort.env.versions.web ?? ort.env.versions.common}/dist/`;
   ort.env.wasm.wasmPaths = {
     mjs: `${cdn}ort-wasm-simd-threaded.asyncify.mjs`,
     wasm: `${cdn}ort-wasm-simd-threaded.asyncify.wasm`,
   };
-  // Use the GPU that's already driving the display. On dual-GPU laptops, waking the
-  // discrete GPU can make the OS switch graphics and stall WebGPU; on single-GPU
-  // devices (phones, Apple Silicon, most desktops) this has no effect.
+  // Waking a discrete GPU on dual-GPU laptops can stall WebGPU while the OS switches graphics.
   ort.env.webgpu.powerPreference = 'low-power';
 
   // Download outside the time limit so a slow connection isn't mistaken for a GPU hang.
-  const model = await fetchModelParts(GPU_MODEL_PART_URLS);
+  const model = await timed('fetch GPU model', () => fetchModelParts(GPU_MODEL_PART_URLS));
 
   const session = await withTimeout(
     (async () => {
-      const s = await ort.InferenceSession.create(model, {
-        executionProviders: ['webgpu'],
-        graphOptimizationLevel: 'all',
-      });
-      // The first run compiles shaders (~1-2 s); do it now while the dialog is open.
+      const s = await timed('create WebGPU session', () =>
+        ort.InferenceSession.create(model, {
+          executionProviders: ['webgpu'],
+          graphOptimizationLevel: 'all',
+        })
+      );
+      // The first run compiles shaders (~1-2 s).
       const dummy = new ort.Tensor('float32', new Float32Array(3 * N * N).fill(1), [1, 3, N, N]);
-      await s.run({ input_rgb: dummy });
+      await timed('warm-up run', () => s.run({ input_rgb: dummy }));
       return s;
     })(),
     WEBGPU_SETUP_TIMEOUT_MS,
@@ -97,13 +99,12 @@ async function createWasmSession(): Promise<LoadedSession> {
   return { ort, session, backend: 'wasm' };
 }
 
-/** Try WebGPU if the browser has it; on any error or timeout, use the CPU (WASM). */
 async function getOrInitSession(): Promise<LoadedSession> {
   if (loaded) return loaded;
   if (loadingPromise) return loadingPromise;
 
   loadingPromise = (async () => {
-    if ('gpu' in navigator) {
+    if (await canUseWebGpu()) {
       try {
         loaded = await createWebGpuSession();
         return loaded;
@@ -154,7 +155,6 @@ async function runLogits(
   return (outputs.logits ?? Object.values(outputs)[0]).data as Float32Array;
 }
 
-/** Horizontally mirrors an RGBA image of size w×h. */
 function flipRgbaHorizontal(rgba: Uint8Array, w: number, h: number): Uint8Array {
   const out = new Uint8Array(rgba.length);
   for (let y = 0; y < h; y++) {
@@ -171,10 +171,7 @@ function flipRgbaHorizontal(rgba: Uint8Array, w: number, h: number): Uint8Array 
   return out;
 }
 
-/**
- * Logits for the image. On WebGPU (cheap) this averages the normal pass with a
- * horizontally flipped pass (test-time augmentation); on WASM it is single-pass.
- */
+// Flip test-time augmentation only on WebGPU; on the CPU it would double a ~15 s run.
 async function segmentLogits(
   s: LoadedSession,
   rgba: Uint8Array,
@@ -231,7 +228,9 @@ self.onmessage = (e: MessageEvent) => {
           };
 
           const s = await getOrInitSession();
-          const logits = await segmentLogits(s, rgba, w, h, options.invert);
+          const logits = await timed(`segment (${s.backend})`, () =>
+            segmentLogits(s, rgba, w, h, options.invert)
+          );
           const masks = logitsToSegmentationMasks(logits, rgba, w, h, options, ocrTextBoxes, N);
 
           const transferables: Transferable[] = [

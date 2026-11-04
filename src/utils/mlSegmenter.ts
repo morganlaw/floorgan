@@ -1,7 +1,7 @@
-// Main-thread side of ML segmentation. ONNX Runtime itself is only loaded inside
-// mlWorker.ts; this module holds the shared pure helpers and the worker RPC.
 import {
   segmentFloorplanOtsu,
+  prewarmOcrWorker,
+  terminateOcrWorker,
   type OcrTextBoxPx,
   type ParseOptions,
   type RawSegment,
@@ -9,7 +9,6 @@ import {
 } from './floorplanParser.ts';
 
 export const ML_MODEL_INPUT_SIZE = 768;
-/** Inference-only budget (model download/session creation is awaited separately). */
 export const ML_INFERENCE_TIMEOUT_MS = 90_000;
 
 const viteBaseUrl =
@@ -20,35 +19,40 @@ const viteBaseUrl =
 
 const modelsBase = `${viteBaseUrl.endsWith('/') ? viteBaseUrl : `${viteBaseUrl}/`}models/`;
 
-// Model: ConvNeXt-Small + UNet ("v1"). On held-out validation plans it beats the
-// distilled ConvNeXt-V2-Tiny ("v2") on 79/80 images (mean IoU 78.7% vs 71.3%).
-// Files are sharded because Cloudflare Pages rejects files over 25 MiB.
+// Sharded because Cloudflare Pages rejects files over 25 MiB.
 const partUrls = (name: string, parts: number) =>
   Array.from({ length: parts }, (_, i) => `${modelsBase}${name}.part${i}`);
 
-/** Dynamic-INT8 model (54 MB) for the CPU (WASM) backend. */
 export const CPU_MODEL_PART_URLS = partUrls('floorplan-seg-v1.onnx', 3);
-/**
- * FP16 model (102 MB) for WebGPU. WebGPU has no kernels for the INT8 model's
- * ConvInteger/MatMulInteger ops (they fall back to CPU per layer, ~60x slower),
- * so the GPU path needs a float model. FP16 output matches FP32 on 99.99% of pixels
- * for this model (the V2 model was not FP16-safe because of its GRN layers).
- */
+// WebGPU has no kernels for the INT8 model's integer ops (they run on the CPU per
+// layer), so the GPU path uses FP16.
 export const GPU_MODEL_PART_URLS = partUrls('floorplan-seg-v1-fp16.onnx', 6);
 
 export type MlBackend = 'webgpu' | 'wasm';
 
-// Same cache name and CPU-model URLs as the previous v1 release, so returning
-// visitors who already cached those shards don't download them again.
+export function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${what} timed out after ${ms} ms`)), ms);
+    promise.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      }
+    );
+  });
+}
+
+// Unchanged from the previous release so returning visitors keep their cached CPU shards.
 export const MODEL_CACHE_NAME = 'floorgan-models-v1';
 export const MODEL_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 class ModelFetchError extends Error {}
 
-/**
- * Rejects error statuses and HTML responses. Some hosts answer unknown paths with
- * an HTML page (status 200); caching that as the "model" would break ML for a week.
- */
+// Some hosts answer unknown paths with an HTML page (status 200); never cache that as the model.
 function assertModelResponse(resp: Response, url: string): void {
   if (!resp.ok) {
     throw new ModelFetchError(`Failed to fetch model ${url}: HTTP ${resp.status}`);
@@ -102,7 +106,6 @@ export async function fetchModelWithCache(url: string): Promise<Uint8Array> {
       await cache.put(url, toCache);
       return new Uint8Array(data);
     } catch (err) {
-      // A bad model response is a real failure; only CacheStorage problems fall through.
       if (err instanceof ModelFetchError) throw err;
       console.warn('CacheStorage failed for model, falling back to direct fetch:', err);
     }
@@ -113,7 +116,6 @@ export async function fetchModelWithCache(url: string): Promise<Uint8Array> {
   return new Uint8Array(await resp.arrayBuffer());
 }
 
-/** Fetches (with caching) and concatenates a model that is split into parts. */
 export async function fetchModelParts(urls: string[]): Promise<Uint8Array> {
   const parts = await Promise.all(urls.map((u) => fetchModelWithCache(u)));
   const out = new Uint8Array(parts.reduce((n, p) => n + p.byteLength, 0));
@@ -125,7 +127,6 @@ export async function fetchModelParts(urls: string[]): Promise<Uint8Array> {
   return out;
 }
 
-/** Deletes model caches from previous releases (e.g. the 54 MB v1 shards). */
 export async function purgeStaleModelCaches(): Promise<void> {
   if (typeof caches === 'undefined') return;
   const names = await caches.keys();
@@ -136,10 +137,7 @@ export async function purgeStaleModelCaches(): Promise<void> {
   );
 }
 
-/**
- * Idle-time housekeeping. The models themselves are not prefetched on page load
- * (the GPU model is ~100 MB); the worker downloads them when the import dialog opens.
- */
+// Only purges old caches; models load on import intent (see prewarmImportPipeline).
 export async function prewarmModelCache(): Promise<void> {
   await purgeStaleModelCaches();
 }
@@ -168,8 +166,7 @@ export function prepareModelInputTensor(
       const r = (rgba[sOff] * a + 255 * (1 - a)) / 255;
       const g = (rgba[sOff + 1] * a + 255 * (1 - a)) / 255;
       const b = (rgba[sOff + 2] * a + 255 * (1 - a)) / 255;
-      // The model was trained on dark lines over light paper, so light-on-dark
-      // blueprints must be inverted before inference (matches the Otsu path).
+      // The model was trained on dark lines over light paper, so blueprints are inverted.
       input[dIdx] = invert ? 1 - r : r;
       input[planeSize + dIdx] = invert ? 1 - g : g;
       input[2 * planeSize + dIdx] = invert ? 1 - b : b;
@@ -309,6 +306,7 @@ function getOrCreateWorker(): Worker {
 }
 
 export function terminateMlWorker(): void {
+  warmPromise = null;
   if (activeWorker) {
     activeWorker.terminate();
     activeWorker = null;
@@ -319,30 +317,54 @@ export function terminateMlWorker(): void {
   }
 }
 
-/**
- * Loads the model in the worker (WebGPU + FP16 when available, otherwise WASM + INT8)
- * and resolves with the backend that was selected.
- */
-export async function prewarmBrowserMl(): Promise<MlBackend> {
+let warmPromise: Promise<MlBackend> | null = null;
+
+export function prewarmBrowserMl(): Promise<MlBackend> {
+  cancelScheduledRelease();
+  if (warmPromise) return warmPromise;
   if (typeof window === 'undefined' || typeof Worker === 'undefined') {
-    throw new Error('Web Workers are not available in this browser');
+    return Promise.reject(new Error('Web Workers are not available in this browser'));
   }
   const worker = getOrCreateWorker();
   const id = msgId++;
-  return new Promise((resolve, reject) => {
+  const p = new Promise<MlBackend>((resolve, reject) => {
     pendingCallbacks.set(id, {
       resolve: (payload: { backend: MlBackend }) => resolve(payload.backend),
       reject,
     });
     worker.postMessage({ id, type: 'WARM' });
   });
+  warmPromise = p;
+  p.catch(() => {
+    if (warmPromise === p) warmPromise = null;
+  });
+  return p;
 }
 
-/**
- * Asks the worker to release its ONNX session (and with it the GPU device) before
- * terminating it, rather than killing it while it still holds GPU resources.
- */
+const IDLE_RELEASE_MS = 5 * 60 * 1000;
+
+let releaseTimer: ReturnType<typeof setTimeout> | null = null;
+
+function cancelScheduledRelease(): void {
+  if (releaseTimer !== null) {
+    clearTimeout(releaseTimer);
+    releaseTimer = null;
+  }
+}
+
+export function scheduleImportRelease(): void {
+  cancelScheduledRelease();
+  releaseTimer = setTimeout(() => {
+    releaseTimer = null;
+    releaseBrowserMlSession().catch(() => {});
+    terminateOcrWorker().catch(() => {});
+  }, IDLE_RELEASE_MS);
+}
+
+// Release the session (and the GPU device) before terminating the worker.
 export async function releaseBrowserMlSession(): Promise<void> {
+  cancelScheduledRelease();
+  warmPromise = null;
   if (!activeWorker) return;
   const worker = activeWorker;
   const id = msgId++;
@@ -370,9 +392,7 @@ export async function segmentFloorplanMlBrowser(
   options: ParseOptions,
   ocrTextBoxes: OcrTextBoxPx[] = []
 ): Promise<SegmentationMasks> {
-  // Download + session creation can take a long time on slow networks or devices.
-  // Wait for it before starting the inference clock so a slow model load is not
-  // misreported as an inference timeout.
+  // Wait for the model load first so a slow download isn't reported as an inference timeout.
   await prewarmBrowserMl();
 
   const worker = getOrCreateWorker();
@@ -383,8 +403,8 @@ export async function segmentFloorplanMlBrowser(
       if (pendingCallbacks.has(id)) {
         pendingCallbacks.delete(id);
         reject(new Error('ML segmentation timed out'));
-        // The worker is still busy with this job; terminate it so later
-        // requests are not queued behind a run nobody is waiting for.
+        // The worker is still busy with this run; terminate it so later requests
+        // aren't queued behind it.
         terminateMlWorker();
       }
     }, ML_INFERENCE_TIMEOUT_MS);
@@ -406,4 +426,24 @@ export async function segmentFloorplanMlBrowser(
       payload: { rgba: rawRgba, w, h, options, ocrTextBoxes },
     });
   });
+}
+
+async function isModelCached(): Promise<boolean> {
+  if (typeof caches === 'undefined') return false;
+  try {
+    const cache = await caches.open(MODEL_CACHE_NAME);
+    const hits = await Promise.all(
+      [GPU_MODEL_PART_URLS[0], CPU_MODEL_PART_URLS[0]].map((u) => cache.match(u))
+    );
+    return hits.some(Boolean);
+  } catch {
+    return false;
+  }
+}
+
+export async function prewarmImportPipeline(trigger: 'hover' | 'press'): Promise<void> {
+  if (trigger === 'hover' && !(await isModelCached())) return;
+  prewarmBrowserMl().catch(() => {});
+  prewarmOcrWorker().catch(() => {});
+  scheduleImportRelease();
 }

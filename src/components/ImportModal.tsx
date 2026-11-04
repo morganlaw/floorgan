@@ -25,15 +25,20 @@ import {
   fetchFloorplanFromUrl,
   fetchImageUrlAsDataUrl,
   createSampleBlueprintDataUrl,
+  prewarmOcrWorker,
   terminateOcrWorker,
   isDarkBlueprintImage,
 } from '../utils/floorplanParser.ts';
 import {
   segmentFloorplanMlBrowser,
   prewarmBrowserMl,
+  scheduleImportRelease,
   releaseBrowserMlSession,
+  withTimeout,
   type MlBackend,
 } from '../utils/mlSegmenter.ts';
+
+const OCR_TIMEOUT_MS = 15_000;
 
 interface ImportModalProps {
   isOpen: boolean;
@@ -79,8 +84,6 @@ export const ImportModal: React.FC<ImportModalProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const mlRunningRef = useRef<boolean>(false);
-  // Incremented whenever the ML input changes (new image or invert toggle) so a
-  // run that finishes after its input went stale can be ignored.
   const mlRunIdRef = useRef<number>(0);
   const loadedImageElRef = useRef<HTMLImageElement | null>(null);
 
@@ -128,14 +131,20 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   }, [isOpen, onClose]);
 
   useEffect(() => {
-    if (isOpen) {
-      prewarmBrowserMl()
-        .then((backend) => setMlBackend(backend))
-        .catch(() => {});
-    } else {
-      releaseBrowserMlSession().catch(() => {});
-      terminateOcrWorker().catch(() => {});
-    }
+    if (!isOpen) return;
+    prewarmBrowserMl()
+      .then((backend) => setMlBackend(backend))
+      .catch(() => {});
+    prewarmOcrWorker().catch(() => {});
+    return () => {
+      // Phones free the model's ~200 MB right away so the tab isn't killed.
+      if (window.matchMedia('(pointer: coarse)').matches) {
+        releaseBrowserMlSession().catch(() => {});
+        terminateOcrWorker().catch(() => {});
+      } else {
+        scheduleImportRelease();
+      }
+    };
   }, [isOpen]);
 
   useEffect(() => {
@@ -178,7 +187,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     let cancelled = false;
     setIsScanningOcr(true);
 
-    extractOcrDimensionsFromImage(loadedImageEl, options.invert)
+    withTimeout(extractOcrDimensionsFromImage(loadedImageEl, options.invert), OCR_TIMEOUT_MS, 'OCR')
       .then((ocrRes) => {
         if (!cancelled) {
           setOcrCandidates(ocrRes.dimensions);
@@ -201,7 +210,6 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     };
   }, [loadedImageEl, options.invert]);
 
-  // Invalidate ML masks when a new image is loaded or inverted
   useEffect(() => {
     setMlMasks(null);
     setMlError(null);
@@ -266,6 +274,11 @@ export const ImportModal: React.FC<ImportModalProps> = ({
 
   useEffect(() => {
     if (!loadedImageEl) return;
+    // On the GPU the ML masks arrive within a second; skip the interim non-ML parse.
+    if (parserEngine === 'ml' && !mlMasks && !mlError && mlBackend === 'webgpu') {
+      setParseResult(null);
+      return;
+    }
     const res = parseFloorplanImage(
       loadedImageEl,
       options,
@@ -276,7 +289,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
       parserEngine === 'ml' && mlMasks ? mlMasks : undefined
     );
     setParseResult(res);
-  }, [loadedImageEl, options, ocrCandidates, useOcrScale, roomCandidates, ocrTextBoxes, parserEngine, mlMasks]);
+  }, [loadedImageEl, options, ocrCandidates, useOcrScale, roomCandidates, ocrTextBoxes, parserEngine, mlMasks, mlError, mlBackend]);
 
   if (!isOpen) return null;
 
@@ -353,6 +366,16 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     onImport(newState);
     onClose();
   };
+
+  const mlBusy = parserEngine === 'ml' && isRunningMl;
+  const isBusy = mlBusy || isScanningOcr;
+  const busyLabel = mlBusy
+    ? mlBackend
+      ? 'Running model…'
+      : 'Loading model…'
+    : isScanningOcr
+      ? 'Reading dimensions…'
+      : null;
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -500,7 +523,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                     {isRunningMl && parserEngine === 'ml' && (
                       <span className="text-xs text-blue-600 flex items-center gap-1">
                         <Loader2 size={12} className="spin" />
-                        Segmenting floorplan
+                        {mlBackend ? 'Segmenting floorplan' : 'Loading model'}
                         {mlBackend === 'webgpu' ? ' (GPU)' : mlBackend === 'wasm' ? ' (CPU, slower)' : ''}...
                       </span>
                     )}
@@ -705,17 +728,11 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                 <button
                   type="button"
                   className="btn-primary"
-                  disabled={!parseResult || (parserEngine === 'ml' && isRunningMl)}
+                  disabled={!parseResult || isBusy}
                   onClick={handleApplyImport}
                 >
-                  {parserEngine === 'ml' && isRunningMl ? (
-                    <Loader2 size={15} className="spin" />
-                  ) : (
-                    <Check size={15} />
-                  )}
-                  <span>
-                    {parserEngine === 'ml' && isRunningMl ? 'Running model…' : 'Generate Floorplan'}
-                  </span>
+                  {isBusy ? <Loader2 size={15} className="spin" /> : <Check size={15} />}
+                  <span>{busyLabel ?? 'Generate Floorplan'}</span>
                 </button>
               </div>
             </div>

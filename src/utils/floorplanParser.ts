@@ -105,10 +105,6 @@ export const ORIGIN_OFFSET_X = 100;
 export const ORIGIN_OFFSET_Y = 100;
 export const MAX_PROC_DIM = 768;
 
-/**
- * Automatically detects if an uploaded image is a dark blueprint / dark-mode plan
- * (white or colored CAD lines on a dark blue/black background).
- */
 export function isDarkBlueprintImage(
   rgba: Uint8ClampedArray | Uint8Array,
   w: number,
@@ -1781,8 +1777,7 @@ function matchDimensionsToPixelWalls(
         }
       }
 
-      // Room dimension labels denote the interior clear span (open area face-to-face),
-      // completely excluding shaded black walls.
+      // Room dimension labels give the interior clear span, excluding the walls.
       const hThickAvg =
         topWall && bottomWall ? (topWall.thickness + bottomWall.thickness) / 2 : 0;
       const vThickAvg =
@@ -2084,6 +2079,10 @@ async function getOcrWorker(): Promise<Tesseract.Worker> {
     ocrWorkerPromise = null;
     throw err;
   }
+}
+
+export async function prewarmOcrWorker(): Promise<void> {
+  await getOcrWorker();
 }
 
 export async function terminateOcrWorker(): Promise<void> {
@@ -2534,11 +2533,6 @@ export function regularizeFloorplanGraph(
     return nearLineThinPixels >= 2 && swingZoneThinPixels >= 4 && thinPixels >= 8;
   }
 
-  /**
-   * Checks whether an ML door blob or wall gap actually contains drawn door
-   * graphics (a swing arc/leaf outside the wall or a threshold/sliding panel
-   * inside the opening) rather than being an empty open passage / archway.
-   */
   function hasDoorGraphicInOpening(
     axis: 'h' | 'v',
     posCm: number,
@@ -2555,8 +2549,8 @@ export function regularizeFloorplanGraph(
     const span = pxEnd - pxStart;
     if (span < 6) return false;
 
-    // Step slightly inside the jambs so 1-2px of wall end-caps where the ML
-    // door mask overlaps the wall aren't mistaken for door graphics.
+    // Step inside the jambs so wall end-caps overlapping the door mask aren't
+    // mistaken for door graphics.
     const pad = Math.min(4, Math.max(2, Math.floor(span * 0.12)));
     const t0 = pxStart + pad;
     const t1 = pxEnd - pad;
@@ -3965,9 +3959,8 @@ export function regularizeFloorplanGraph(
           (snapped.axis === 'h' ? snapped.posCm : snapped.centerCm) +
             ORIGIN_OFFSET_Y
         );
-        // The segmentation model tends to label any wall gap between rooms as
-        // a door. Without a drawn swing arc or door leaf/panel, the gap is an
-        // open passage, so carve the wall opening without inserting a door.
+        // The model labels most wall gaps between rooms as doors; without a drawn
+        // swing or leaf it's an open passage.
         if (
           activeHeuristicConfig.requireDoorSwingForMlDoors &&
           !hasDoorGraphicInOpening(

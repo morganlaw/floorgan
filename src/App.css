@@ -1,4 +1,3 @@
-/* App Layout */
 .app-container {
   display: flex;
   flex-direction: column;
@@ -10,14 +9,12 @@
   overflow: hidden;
 }
 
-/* Mobile-only elements default hidden on desktop */
 .mobile-close-btn,
 .mobile-drawer-backdrop,
 .mobile-bottom-bar {
   display: none;
 }
 
-/* Top Toolbar */
 .toolbar {
   height: 56px;
   background-color: #ffffff;
@@ -28,7 +25,6 @@
   gap: 12px;
   z-index: 10;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-  /* Safety net: never let controls fall off-screen on narrower desktops. */
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: thin;
@@ -42,7 +38,7 @@
   flex-shrink: 0;
 }
 
-/* Laptop Toolbar: icon-only tools when full labels don't fit (~1378px needed) */
+/* Full toolbar labels need ~1378px. */
 @media (max-width: 1380px) and (min-width: 861px) {
   .tool-btn span {
     display: none;
@@ -55,7 +51,6 @@
   }
 }
 
-/* Tablet & Laptop Panel Auto-Adjustment (861px to 1200px) */
 @media (max-width: 1200px) and (min-width: 861px) {
   .sidebar {
     width: 230px;
@@ -223,7 +218,6 @@
   border-color: #3b82f6;
 }
 
-/* Main Workspace */
 .workspace {
   display: flex;
   flex: 1;
@@ -233,7 +227,6 @@
   overflow: hidden;
 }
 
-/* Left Sidebar */
 .sidebar {
   width: 270px;
   background-color: #ffffff;
@@ -399,7 +392,6 @@
   color: #ffffff;
 }
 
-/* Center Canvas */
 .canvas-wrapper {
   flex: 1;
   height: 100%;
@@ -415,7 +407,6 @@
   touch-action: none;
 }
 
-/* Right Properties Inspector */
 .properties-panel {
   width: 250px;
   background-color: #ffffff;
@@ -615,13 +606,11 @@
   border-bottom: none;
 }
 
-/* Floating Shortcuts Button */
-/* Shortcuts Modal */
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background-color: rgba(15, 23, 42, 0.4);
-  backdrop-filter: blur(2px);
+  /* No backdrop-filter: a full-screen blur stalls WebGPU setup in Chrome on Intel Macs. */
+  background-color: rgba(15, 23, 42, 0.5);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -785,7 +774,6 @@ kbd {
   margin-top: 12px;
 }
 
-/* Toolbar Import Button Highlight & Indicator Callout */
 .import-btn-container {
   position: relative;
   display: flex;
@@ -901,7 +889,6 @@ kbd {
   cursor: not-allowed;
 }
 
-/* Import Floorplan Modal */
 .import-modal-card {
   width: 920px;
   max-width: 95vw;
@@ -1145,7 +1132,6 @@ kbd {
   gap: 12px;
 }
 
-/* Canvas Scale Calibration Banner & Popover */
 .canvas-floating-banner {
   position: absolute;
   top: 14px;
@@ -1210,7 +1196,6 @@ kbd {
   animation: spin 1s linear infinite;
 }
 
-/* Canvas Bottom-Left Grid Cell HUD */
 .canvas-grid-hud {
   position: absolute;
   bottom: 16px;
@@ -1231,7 +1216,6 @@ kbd {
   user-select: none;
 }
 
-/* Floating Canvas Zoom & View Controls */
 .canvas-zoom-controls {
   position: absolute;
   bottom: 16px;
@@ -1302,7 +1286,6 @@ kbd {
 
 
 
-/* Shared helpers */
 .divider {
   height: 1px;
   background-color: #e2e8f0;
@@ -1445,7 +1428,6 @@ kbd {
   text-decoration: underline;
 }
 
-/* Custom catalog items */
 .chip-count {
   font-size: 9px;
   font-weight: 700;
@@ -1546,7 +1528,6 @@ kbd {
   color: #dc2626;
 }
 
-/* Custom Object Creator */
 .creator-modal-card {
   width: 920px;
   max-width: 96vw;
@@ -1780,10 +1761,6 @@ kbd {
   cursor: not-allowed;
 }
 
-/* ==========================================================================
-   Mobile & Tablet Responsive Styles (<= 860px)
-   ========================================================================== */
-
 @media (max-width: 860px) {
   .app-container {
     height: 100dvh;
@@ -1795,7 +1772,6 @@ kbd {
     width: 100vw;
   }
 
-  /* Top Toolbar on Mobile */
   .toolbar {
     height: 52px;
     padding: 0 10px;
@@ -1858,7 +1834,6 @@ kbd {
     margin: 0 2px;
   }
 
-  /* Drawers (Sidebar & Properties Panel) */
   .sidebar {
     position: fixed;
     top: 0;
@@ -1903,7 +1878,6 @@ kbd {
     pointer-events: auto;
   }
 
-  /* Drawer Backdrop */
   .mobile-drawer-backdrop {
     display: block;
     position: fixed;
@@ -1913,7 +1887,6 @@ kbd {
     z-index: 45;
   }
 
-  /* Mobile Close Button */
   .mobile-close-btn {
     display: flex;
     align-items: center;
@@ -1951,7 +1924,6 @@ kbd {
     align-items: center;
   }
 
-  /* Mobile Bottom Navigation Bar */
   .mobile-bottom-bar {
     display: flex;
     position: fixed;
@@ -2051,7 +2023,6 @@ kbd {
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
   }
 
-  /* Canvas Controls on Mobile */
   .canvas-grid-hud {
     bottom: 12px;
     left: 12px;
@@ -2079,7 +2050,6 @@ kbd {
     height: 38px;
   }
 
-  /* Modals on Mobile */
   .import-modal-card {
     width: 96vw;
     max-height: 92dvh;
@@ -2129,7 +2099,6 @@ kbd {
   }
 }
 
-/* Extra small mobile screens (<= 520px) */
 @media (max-width: 520px) {
   .preview-footer {
     flex-direction: column;
@@ -2184,7 +2153,6 @@ kbd {
   }
 }
 
-/* Landscape / short-height screens (<= 600px height) */
 @media (max-height: 600px) {
   .toolbar {
     height: 46px;
@@ -2212,7 +2180,6 @@ kbd {
   }
 }
 
-/* Visible keyboard focus for all interactive controls */
 button:focus-visible,
 [role='button']:focus-visible,
 a:focus-visible {

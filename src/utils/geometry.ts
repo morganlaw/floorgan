@@ -25,13 +25,11 @@ export function snapToWallFaces(point: Point, walls: Wall[], threshold = 14): Po
       const minX = Math.min(w.start.x, w.end.x);
       const maxX = Math.max(w.start.x, w.end.x);
       if (point.x >= minX - 10 && point.x <= maxX + 10) {
-        // Top face
         const dTop = Math.abs(point.y - (w.start.y - halfT));
         if (dTop < minD) {
           minD = dTop;
           bestPt = { x: point.x, y: Math.round(w.start.y - halfT) };
         }
-        // Bottom face
         const dBot = Math.abs(point.y - (w.start.y + halfT));
         if (dBot < minD) {
           minD = dBot;
@@ -42,13 +40,11 @@ export function snapToWallFaces(point: Point, walls: Wall[], threshold = 14): Po
       const minY = Math.min(w.start.y, w.end.y);
       const maxY = Math.max(w.start.y, w.end.y);
       if (point.y >= minY - 10 && point.y <= maxY + 10) {
-        // Left face
         const dLeft = Math.abs(point.x - (w.start.x - halfT));
         if (dLeft < minD) {
           minD = dLeft;
           bestPt = { x: Math.round(w.start.x - halfT), y: point.y };
         }
-        // Right face
         const dRight = Math.abs(point.x - (w.start.x + halfT));
         if (dRight < minD) {
           minD = dRight;

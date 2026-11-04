@@ -8,7 +8,7 @@ import { FloorplanCanvas } from './components/FloorplanCanvas';
 import { PropertiesPanel } from './components/PropertiesPanel';
 import { ImportModal } from './components/ImportModal';
 import { useFloorplanHistory } from './utils/useHistory';
-import { prewarmModelCache } from './utils/mlSegmenter.ts';
+import { prewarmModelCache, prewarmImportPipeline } from './utils/mlSegmenter.ts';
 import './App.css';
 
 const STORAGE_KEY = 'floorgan_floorplan_v1';
@@ -57,9 +57,8 @@ export const App: React.FC = () => {
     endInteraction,
   } = useFloorplanHistory(getInitialFloorplan());
 
-  // Persist with a debounce: state changes on every pointer move while dragging,
-  // and serializing the whole plan (including the background image data URL)
-  // synchronously on each move causes visible jank.
+  // Debounced: state changes on every pointer move while dragging, and serializing
+  // the plan (with its background image) each time causes jank.
   const latestStateRef = useRef(state);
   latestStateRef.current = state;
   const pendingSaveRef = useRef<number | null>(null);
@@ -106,7 +105,6 @@ export const App: React.FC = () => {
 
   const [zoom, setZoom] = useState<number>(0.9);
   const [pan, setPan] = useState<{ x: number; y: number }>({ x: 140, y: 100 });
-  // Bumped to ask the canvas to fit the plan to the viewport (also runs on mount).
   const [fitViewToken, setFitViewToken] = useState<number>(0);
   const [showHelp, setShowHelp] = useState<boolean>(false);
   const [showImportModal, setShowImportModal] = useState<boolean>(false);
@@ -189,6 +187,7 @@ export const App: React.FC = () => {
         setSelectedIds={setSelectedIds}
         setSelectedType={setSelectedType}
         onOpenImportModal={() => setShowImportModal(true)}
+        onImportIntent={prewarmImportPipeline}
         onOpenShortcuts={() => setShowHelp(true)}
         undo={undo}
         redo={redo}

@@ -8,9 +8,7 @@ export default defineConfig({
   resolve: {
     alias: [
       {
-        // ORT's default WebGPU entry bundles a 26.8 MB wasm binary, over Cloudflare
-        // Pages' 25 MiB per-file limit. Use the "extern wasm" build instead; mlWorker.ts
-        // points it at a version-pinned copy on jsDelivr via env.wasm.wasmPaths.
+        // ORT's default WebGPU build bundles a 26.8 MB wasm, over Cloudflare's 25 MiB file limit.
         find: /^onnxruntime-web\/webgpu$/,
         replacement: fileURLToPath(
           new URL('./node_modules/onnxruntime-web/dist/ort.webgpu.min.mjs', import.meta.url)
@@ -22,7 +20,7 @@ export default defineConfig({
     exclude: ['onnxruntime-web'],
   },
   worker: {
-    // The ML worker lazy-loads one of two ORT builds, which needs code splitting.
+    // The worker lazy-loads one of two ORT builds, which needs code splitting.
     format: 'es',
   },
   build: {
