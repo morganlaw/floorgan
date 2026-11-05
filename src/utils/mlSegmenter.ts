@@ -127,6 +127,96 @@ export async function fetchModelParts(urls: string[]): Promise<Uint8Array> {
   return out;
 }
 
+type GpuAdapterLike = { features: { has(name: string): boolean } };
+type GpuLike = { requestAdapter(options?: object): Promise<GpuAdapterLike | null> };
+
+// Shared by the worker (which backend to load) and the prefetch (which model to download).
+export async function canUseWebGpu(): Promise<boolean> {
+  const gpu = (navigator as { gpu?: GpuLike }).gpu;
+  if (!gpu) return false;
+  try {
+    const adapter = await withTimeout(
+      gpu.requestAdapter({ powerPreference: 'low-power' }),
+      5_000,
+      'WebGPU adapter request'
+    );
+    return !!adapter?.features.has('shader-f16');
+  } catch (err) {
+    console.warn(err);
+    return false;
+  }
+}
+
+// Streams one shard into the model cache without holding it in memory.
+async function prefetchModelPart(cache: Cache, url: string): Promise<void> {
+  const cached = await cache.match(url);
+  if (cached && !isHtmlResponse(cached)) return;
+  const resp = await fetch(url, { priority: 'low' } as RequestInit);
+  assertModelResponse(resp, url);
+  const headers = new Headers(resp.headers);
+  headers.set('x-floorgan-cached-at', String(Date.now()));
+  await cache.put(url, new Response(resp.body, { status: resp.status, headers }));
+}
+
+let modelPrefetch: Promise<void> | null = null;
+let importDialogOpen = false;
+
+export function setImportDialogOpen(open: boolean): void {
+  importDialogOpen = open;
+  if (!open) cancelPendingWarm();
+}
+
+/**
+ * Downloads the model this device will use into the cache, so the worker's later load is a
+ * cache hit. Network only: no GPU work, so it doesn't stall the UI. Safe to call repeatedly.
+ */
+export function prefetchModel(): Promise<void> {
+  if (modelPrefetch) return modelPrefetch;
+  if (typeof caches === 'undefined') return Promise.resolve();
+  modelPrefetch = (async () => {
+    const urls = (await canUseWebGpu()) ? GPU_MODEL_PART_URLS : CPU_MODEL_PART_URLS;
+    const cache = await caches.open(MODEL_CACHE_NAME);
+    await Promise.all(urls.map((u) => prefetchModelPart(cache, u)));
+  })().catch((err) => {
+    // The worker downloads the model itself if this fails.
+    console.warn('Model prefetch failed:', err);
+  });
+  return modelPrefetch;
+}
+
+type NetworkInformationLike = { saveData?: boolean; effectiveType?: string; type?: string };
+
+// navigator.connection is Chromium-only; other browsers report nothing and get the download.
+function isConstrainedNetwork(): boolean {
+  const conn = (navigator as { connection?: NetworkInformationLike }).connection;
+  if (!conn) return false;
+  return (
+    conn.saveData === true ||
+    conn.effectiveType === 'slow-2g' ||
+    conn.effectiveType === '2g' ||
+    conn.type === 'cellular'
+  );
+}
+
+/**
+ * Called once after the first paint. Most visits import a floorplan, so fetch the model
+ * and OCR data up front instead of waiting for the user to open the import dialog.
+ */
+export async function prefetchImportAssets(): Promise<void> {
+  if (isConstrainedNetwork()) return;
+  await prefetchModel();
+  // Starting the OCR worker downloads and caches its language data.
+  await prewarmOcrWorker().catch(() => {});
+  // The dialog manages the workers while it is open.
+  if (importDialogOpen) return;
+  if (window.matchMedia('(pointer: coarse)').matches) {
+    // Phones keep the cached data but not the worker's memory until it's needed.
+    await terminateOcrWorker().catch(() => {});
+  } else {
+    scheduleImportRelease();
+  }
+}
+
 export async function purgeStaleModelCaches(): Promise<void> {
   if (typeof caches === 'undefined') return;
   const names = await caches.keys();
@@ -301,6 +391,7 @@ function getOrCreateWorker(): Worker {
 }
 
 export function terminateMlWorker(): void {
+  warmGeneration++;
   warmPromise = null;
   if (activeWorker) {
     activeWorker.terminate();
@@ -313,6 +404,15 @@ export function terminateMlWorker(): void {
 }
 
 let warmPromise: Promise<MlBackend> | null = null;
+// Bumped to cancel a warm-up that is still waiting for the model download, so a dialog that
+// closed mid-download doesn't start GPU setup (and hold its memory) after the fact.
+let warmGeneration = 0;
+
+function cancelPendingWarm(): void {
+  warmGeneration++;
+  // Once a worker exists the warm-up has already started; keep it for reuse.
+  if (!activeWorker) warmPromise = null;
+}
 
 export function prewarmBrowserMl(): Promise<MlBackend> {
   cancelScheduledRelease();
@@ -320,15 +420,22 @@ export function prewarmBrowserMl(): Promise<MlBackend> {
   if (typeof window === 'undefined' || typeof Worker === 'undefined') {
     return Promise.reject(new Error('Web Workers are not available in this browser'));
   }
-  const worker = getOrCreateWorker();
-  const id = msgId++;
-  const p = new Promise<MlBackend>((resolve, reject) => {
-    pendingCallbacks.set(id, {
-      resolve: (payload: { backend: MlBackend }) => resolve(payload.backend),
-      reject,
+  const generation = warmGeneration;
+  const p = (async () => {
+    // Join an in-flight prefetch (or start one) so the worker reads the model from the cache
+    // instead of downloading it a second time.
+    await prefetchModel();
+    if (generation !== warmGeneration) throw new Error('Model warm-up cancelled');
+    const worker = getOrCreateWorker();
+    const id = msgId++;
+    return new Promise<MlBackend>((resolve, reject) => {
+      pendingCallbacks.set(id, {
+        resolve: (payload: { backend: MlBackend }) => resolve(payload.backend),
+        reject,
+      });
+      worker.postMessage({ id, type: 'WARM' });
     });
-    worker.postMessage({ id, type: 'WARM' });
-  });
+  })();
   warmPromise = p;
   p.catch(() => {
     if (warmPromise === p) warmPromise = null;
@@ -359,6 +466,7 @@ export function scheduleImportRelease(): void {
 // Release the session (and the GPU device) before terminating the worker.
 export async function releaseBrowserMlSession(): Promise<void> {
   cancelScheduledRelease();
+  warmGeneration++;
   warmPromise = null;
   if (!activeWorker) return;
   const worker = activeWorker;
@@ -421,24 +529,4 @@ export async function segmentFloorplanMlBrowser(
       payload: { rgba: rawRgba, w, h, options, ocrTextBoxes },
     });
   });
-}
-
-async function isModelCached(): Promise<boolean> {
-  if (typeof caches === 'undefined') return false;
-  try {
-    const cache = await caches.open(MODEL_CACHE_NAME);
-    const hits = await Promise.all(
-      [GPU_MODEL_PART_URLS[0], CPU_MODEL_PART_URLS[0]].map((u) => cache.match(u))
-    );
-    return hits.some(Boolean);
-  } catch {
-    return false;
-  }
-}
-
-export async function prewarmImportPipeline(trigger: 'hover' | 'press'): Promise<void> {
-  if (trigger === 'hover' && !(await isModelCached())) return;
-  prewarmBrowserMl().catch(() => {});
-  prewarmOcrWorker().catch(() => {});
-  scheduleImportRelease();
 }

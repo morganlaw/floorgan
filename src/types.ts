@@ -112,7 +112,10 @@ export interface TextBoxItem {
 }
 
 export interface BackgroundLayer {
-  dataUrl: string;
+  /** Key of the image blob in IndexedDB (see utils/underlayStore). */
+  imageId?: string;
+  /** Embedded image; only in plans saved before images moved to IndexedDB. */
+  dataUrl?: string;
   x: number;
   y: number;
   width: number;

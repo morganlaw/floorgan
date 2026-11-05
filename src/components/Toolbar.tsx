@@ -25,7 +25,6 @@ interface ToolbarProps {
   setSelectedIds?: (ids: string[]) => void;
   setSelectedType: (type: SelectedElementType) => void;
   onOpenImportModal: () => void;
-  onImportIntent?: (trigger: 'hover' | 'press') => void;
   onOpenShortcuts?: () => void;
   undo: () => void;
   redo: () => void;
@@ -42,7 +41,6 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   setSelectedIds,
   setSelectedType,
   onOpenImportModal,
-  onImportIntent,
   onOpenShortcuts,
   undo,
   redo,
@@ -138,9 +136,6 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           ref={importBtnRef}
           className="tool-btn import-highlight-btn"
           onClick={onOpenImportModal}
-          onPointerEnter={() => onImportIntent?.('hover')}
-          onPointerDown={() => onImportIntent?.('press')}
-          onFocus={() => onImportIntent?.('press')}
           title="Import floorplan from image upload or website URL"
         >
           <Upload size={16} />
@@ -151,8 +146,6 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           <button
             type="button"
             className="import-indicator-callout"
-            onPointerEnter={() => onImportIntent?.('hover')}
-            onPointerDown={() => onImportIntent?.('press')}
             style={calloutPos ? { top: calloutPos.top, left: calloutPos.left } : undefined}
             onClick={() => {
               setShowImportHint(false);

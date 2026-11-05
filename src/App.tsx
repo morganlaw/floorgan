@@ -8,41 +8,21 @@ import { FloorplanCanvas } from './components/FloorplanCanvas';
 import { PropertiesPanel } from './components/PropertiesPanel';
 import { ImportModal } from './components/ImportModal';
 import { useFloorplanHistory } from './utils/useHistory';
-import { purgeStaleModelCaches, prewarmImportPipeline } from './utils/mlSegmenter.ts';
+import { purgeStaleModelCaches, prefetchImportAssets } from './utils/mlSegmenter.ts';
+import { loadSavedFloorplan, saveFloorplan } from './utils/persistence.ts';
+import {
+  hasPendingInlineImages,
+  migrateLegacyUnderlays,
+  pruneUnderlays,
+} from './utils/underlayStore.ts';
 import './App.css';
 
-const STORAGE_KEY = 'floorgan_floorplan_v1';
 const SAVE_DEBOUNCE_MS = 400;
-
-function saveFloorplan(state: FloorplanState): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  } catch {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, background: null }));
-      console.warn('Floorplan saved without background image (storage quota exceeded)');
-    } catch (innerErr) {
-      console.warn('Could not save floorplan to localStorage', innerErr);
-    }
-  }
-}
+// Unreferenced underlay images are kept this long, in case another tab just imported one.
+const UNDERLAY_PRUNE_AGE_MS = 24 * 60 * 60 * 1000;
 
 function getInitialFloorplan(): FloorplanState {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY) || localStorage.getItem('mapgan_floorplan_v1');
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (parsed && Array.isArray(parsed.walls)) {
-        return {
-          ...parsed,
-          measurements: parsed.measurements || [],
-        };
-      }
-    }
-  } catch (e) {
-    console.warn('Could not load saved floorplan from localStorage', e);
-  }
-  return TEMPLATES.studio.state;
+  return loadSavedFloorplan() ?? TEMPLATES.studio.state;
 }
 
 export const App: React.FC = () => {
@@ -55,7 +35,7 @@ export const App: React.FC = () => {
     canRedo,
     startInteraction,
     endInteraction,
-  } = useFloorplanHistory(getInitialFloorplan());
+  } = useFloorplanHistory(getInitialFloorplan);
 
   // Debounced: state changes on every pointer move while dragging, and serializing
   // the plan (with its background image) each time causes jank.
@@ -70,6 +50,19 @@ export const App: React.FC = () => {
       saveFloorplan(latestStateRef.current);
     }, SAVE_DEBOUNCE_MS);
   }, [state]);
+
+  // Move an image embedded in an older save into IndexedDB, then drop stale stored images.
+  useEffect(() => {
+    (async () => {
+      if (hasPendingInlineImages()) {
+        await migrateLegacyUnderlays();
+        // Rewrite the save without the embedded image (a no-op if the move failed).
+        saveFloorplan(latestStateRef.current);
+      }
+      const current = latestStateRef.current.background?.imageId;
+      await pruneUnderlays(new Set(current ? [current] : []), UNDERLAY_PRUNE_AGE_MS);
+    })().catch((err) => console.warn('Underlay storage maintenance failed:', err));
+  }, []);
 
   useEffect(() => {
     const flush = () => {
@@ -87,13 +80,17 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const purge = () => {
-        purgeStaleModelCaches().catch(() => {});
+      // Most visits import a floorplan: start downloading the model once the page has painted.
+      const afterFirstPaint = () => {
+        purgeStaleModelCaches()
+          .catch(() => {})
+          .then(() => prefetchImportAssets())
+          .catch(() => {});
       };
       if ('requestIdleCallback' in window) {
-        (window as unknown as { requestIdleCallback: (cb: () => void, opts: { timeout: number }) => void }).requestIdleCallback(purge, { timeout: 3500 });
+        (window as unknown as { requestIdleCallback: (cb: () => void, opts: { timeout: number }) => void }).requestIdleCallback(afterFirstPaint, { timeout: 1500 });
       } else {
-        setTimeout(purge, 1500);
+        setTimeout(afterFirstPaint, 500);
       }
     }
   }, []);
@@ -187,7 +184,6 @@ export const App: React.FC = () => {
         setSelectedIds={setSelectedIds}
         setSelectedType={setSelectedType}
         onOpenImportModal={() => setShowImportModal(true)}
-        onImportIntent={prewarmImportPipeline}
         onOpenShortcuts={() => setShowHelp(true)}
         undo={undo}
         redo={redo}

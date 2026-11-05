@@ -7,12 +7,16 @@ interface HistoryState {
   future: FloorplanState[];
 }
 
-export function useFloorplanHistory(initialState: FloorplanState, maxDepth = 50) {
-  const [history, setHistory] = useState<HistoryState>({
+export function useFloorplanHistory(
+  initialState: FloorplanState | (() => FloorplanState),
+  maxDepth = 50
+) {
+  // Lazy: the initializer reads and parses the saved plan, which must not happen every render.
+  const [history, setHistory] = useState<HistoryState>(() => ({
     past: [],
-    present: initialState,
+    present: typeof initialState === 'function' ? initialState() : initialState,
     future: [],
-  });
+  }));
 
   const interactionSnapshotRef = useRef<FloorplanState | null>(null);
 

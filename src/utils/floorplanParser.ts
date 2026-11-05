@@ -70,7 +70,6 @@ export interface ParseResult {
   windows: WindowItem[];
   furniture: PlacedFurniture[];
   roomLabels: RoomLabel[];
-  maskPreviewDataUrl: string;
   computedThreshold: number;
   originOffset: { x: number; y: number };
   boundsCm: { width: number; height: number };
@@ -4490,7 +4489,6 @@ export function parseFloorplanRgbaBuffer(
     windows,
     furniture: [],
     roomLabels: [],
-    maskPreviewDataUrl: '',
     computedThreshold,
     originOffset: { x: ORIGIN_OFFSET_X, y: ORIGIN_OFFSET_Y },
     boundsCm: {
@@ -4504,107 +4502,23 @@ export function parseFloorplanRgbaBuffer(
   };
 }
 
-export function parseFloorplanImage(
-  img: HTMLImageElement,
-  options: ParseOptions,
-  ocrCandidates: RawDimensionCandidate[] = [],
-  useOcrScale = true,
-  roomCandidates: RawRoomNameCandidate[] = [],
-  ocrTextBoxes: OcrTextBoxPx[] = [],
-  customMasks?: SegmentationMasks
-): ParseResult {
-  const naturalW = img.naturalWidth || img.width || 600;
-  const naturalH = img.naturalHeight || img.height || 450;
-
-  const downscale = Math.min(1, MAX_PROC_DIM / Math.max(naturalW, naturalH));
-  const w = Math.max(64, Math.round(naturalW * downscale));
-  const h = Math.max(64, Math.round(naturalH * downscale));
-
-  const canvas = document.createElement('canvas');
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext('2d')!;
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, w, h);
-  ctx.drawImage(img, 0, 0, w, h);
-
-  const imgData = ctx.getImageData(0, 0, w, h);
-  const result = parseFloorplanRgbaBuffer(
-    imgData.data,
-    w,
-    h,
-    options,
-    ocrCandidates,
-    useOcrScale,
-    roomCandidates,
-    ocrTextBoxes,
-    customMasks
-  );
-
-  const { structuralMask, rawMask, doorMask, windowMask } = result.masks;
-
-  const previewCanvas = document.createElement('canvas');
-  previewCanvas.width = w;
-  previewCanvas.height = h;
-  const pCtx = previewCanvas.getContext('2d')!;
-  const pData = pCtx.createImageData(w, h);
-  for (let i = 0; i < w * h; i++) {
-    const isDoor = doorMask ? doorMask[i] === 1 : false;
-    const isWin = windowMask ? windowMask[i] === 1 : false;
-    const isWall = structuralMask[i] === 1;
-    const isRaw = rawMask[i] === 1;
-    if (isDoor) {
-      pData.data[i * 4] = 5;
-      pData.data[i * 4 + 1] = 150;
-      pData.data[i * 4 + 2] = 105;
-      pData.data[i * 4 + 3] = 255;
-    } else if (isWin) {
-      pData.data[i * 4] = 2;
-      pData.data[i * 4 + 1] = 132;
-      pData.data[i * 4 + 2] = 199;
-      pData.data[i * 4 + 3] = 255;
-    } else if (isWall) {
-      pData.data[i * 4] = 30;
-      pData.data[i * 4 + 1] = 64;
-      pData.data[i * 4 + 2] = 175;
-      pData.data[i * 4 + 3] = 255;
-    } else if (isRaw) {
-      pData.data[i * 4] = 203;
-      pData.data[i * 4 + 1] = 213;
-      pData.data[i * 4 + 2] = 225;
-      pData.data[i * 4 + 3] = 255;
-    } else {
-      pData.data[i * 4] = 248;
-      pData.data[i * 4 + 1] = 250;
-      pData.data[i * 4 + 2] = 252;
-      pData.data[i * 4 + 3] = 255;
-    }
-  }
-  pCtx.putImageData(pData, 0, 0);
-
-  return {
-    ...result,
-    maskPreviewDataUrl: previewCanvas.toDataURL('image/png'),
-  };
-}
-
 export async function fetchFloorplanFromUrl(rawUrl: string): Promise<{
-  primaryDataUrl?: string;
+  primaryBlob?: Blob;
   candidates: { url: string; label: string }[];
 }> {
   const trimmed = rawUrl.trim();
   if (!trimmed) throw new Error('Please enter a valid URL.');
 
   if (trimmed.startsWith('data:image/')) {
-    return { primaryDataUrl: trimmed, candidates: [] };
+    return { primaryBlob: await (await fetch(trimmed)).blob(), candidates: [] };
   }
 
   const normalizedUrl = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
 
   try {
-    const directImageDataUrl = await fetchImageUrlAsDataUrl(normalizedUrl);
-    if (directImageDataUrl) {
-      return { primaryDataUrl: directImageDataUrl, candidates: [] };
+    const directImage = await fetchImageUrlAsBlob(normalizedUrl);
+    if (directImage) {
+      return { primaryBlob: directImage, candidates: [] };
     }
   } catch {
   }
@@ -4634,8 +4548,8 @@ export async function fetchFloorplanFromUrl(rawUrl: string): Promise<{
         const candidates = extractFloorplanImagesFromHtml(html, normalizedUrl);
         if (candidates.length > 0) {
           try {
-            const firstDataUrl = await fetchImageUrlAsDataUrl(candidates[0].url);
-            return { primaryDataUrl: firstDataUrl, candidates };
+            const firstImage = await fetchImageUrlAsBlob(candidates[0].url);
+            return { primaryBlob: firstImage, candidates };
           } catch {
             return { candidates };
           }
@@ -4652,8 +4566,8 @@ export async function fetchFloorplanFromUrl(rawUrl: string): Promise<{
   );
 }
 
-export async function fetchImageUrlAsDataUrl(imageUrl: string): Promise<string> {
-  if (imageUrl.startsWith('data:image/')) return imageUrl;
+export async function fetchImageUrlAsBlob(imageUrl: string): Promise<Blob> {
+  if (imageUrl.startsWith('data:image/')) return (await fetch(imageUrl)).blob();
 
   const proxies = [
     (u: string) => `https://wsrv.nl/?url=${encodeURIComponent(u)}&output=png`,
@@ -4671,22 +4585,13 @@ export async function fetchImageUrlAsDataUrl(imageUrl: string): Promise<string> 
       }
       const blob = await resp.blob();
       if (blob.size > 100) {
-        return await blobToDataUrl(blob);
+        return blob;
       }
     } catch {
     }
   }
 
   throw new Error('Could not fetch remote image due to cross-origin restrictions.');
-}
-
-function blobToDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = () => reject(new Error('Failed to read image blob.'));
-    reader.readAsDataURL(blob);
-  });
 }
 
 function extractFloorplanImagesFromHtml(
@@ -4810,7 +4715,7 @@ export function rescaleFloorplanState(
   };
 }
 
-export function createSampleBlueprintDataUrl(): string {
+export function createSampleBlueprintBlob(): Promise<Blob> {
   const canvas = document.createElement('canvas');
   canvas.width = 800;
   canvas.height = 620;
@@ -4881,5 +4786,7 @@ export function createSampleBlueprintDataUrl(): string {
   ctx.fillText('KITCHEN', 190, 165);
   ctx.fillText('5.2m x 3.1m', 185, 195);
 
-  return canvas.toDataURL('image/png');
+  return new Promise((resolve, reject) =>
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Could not render sample image'))), 'image/png')
+  );
 }

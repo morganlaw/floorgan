@@ -10,11 +10,10 @@ import {
   RawRoomNameCandidate,
   OcrTextBoxPx,
   SegmentationMasks,
-  parseFloorplanImage,
   extractOcrDimensionsFromImage,
   fetchFloorplanFromUrl,
-  fetchImageUrlAsDataUrl,
-  createSampleBlueprintDataUrl,
+  fetchImageUrlAsBlob,
+  createSampleBlueprintBlob,
   prewarmOcrWorker,
   terminateOcrWorker,
   isDarkBlueprintImage,
@@ -24,9 +23,12 @@ import {
   prewarmBrowserMl,
   scheduleImportRelease,
   releaseBrowserMlSession,
+  setImportDialogOpen,
   withTimeout,
   type MlBackend,
 } from '../utils/mlSegmenter.ts';
+import { parseFloorplanInWorker } from '../utils/parseClient.ts';
+import { storeUnderlayImage } from '../utils/underlayStore.ts';
 
 const OCR_TIMEOUT_MS = 15_000;
 
@@ -43,8 +45,17 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   state,
   onImport,
 }) => {
-  const [imageDataUrl, setImageDataUrl] = useState<string | null>(null);
+  // The image is kept as binary data; the preview gets a short-lived object URL for it.
+  const [imageBlob, setImageBlob] = useState<Blob | null>(null);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [isApplying, setIsApplying] = useState(false);
   const [loadedImageEl, setLoadedImageEl] = useState<HTMLImageElement | null>(null);
+  // The image downscaled to processing size, decoded once and shared by the model and the parser.
+  const [imagePixels, setImagePixels] = useState<{
+    rgba: Uint8ClampedArray;
+    w: number;
+    h: number;
+  } | null>(null);
 
   const [urlInput, setUrlInput] = useState('');
   const [isLoadingUrl, setIsLoadingUrl] = useState(false);
@@ -67,6 +78,8 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   const [mlError, setMlError] = useState<string | null>(null);
   const [mlBackend, setMlBackend] = useState<MlBackend | null>(null);
   const [parseResult, setParseResult] = useState<ParseResult | null>(null);
+  const [isParsing, setIsParsing] = useState<boolean>(false);
+  const [parseError, setParseError] = useState<string | null>(null);
   const [includeUnderlay, setIncludeUnderlay] = useState<boolean>(true);
   const [keepExistingFurniture, setKeepExistingFurniture] = useState<boolean>(false);
 
@@ -82,12 +95,18 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   const handleFileSelect = (file: File) => {
     setUrlError(null);
     setUrlCandidates([]);
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      setImageDataUrl(e.target?.result as string);
-    };
-    reader.readAsDataURL(file);
+    setImageBlob(file);
   };
+
+  useEffect(() => {
+    if (!imageBlob) {
+      setImageUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(imageBlob);
+    setImageUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [imageBlob]);
 
   const fetchFromUrl = async (rawUrl: string) => {
     const url = rawUrl.trim();
@@ -101,11 +120,10 @@ export const ImportModal: React.FC<ImportModalProps> = ({
       if (result.candidates.length > 0) {
         setUrlCandidates(result.candidates);
       }
-      if (result.primaryDataUrl) {
-        setImageDataUrl(result.primaryDataUrl);
+      if (result.primaryBlob) {
+        setImageBlob(result.primaryBlob);
       } else if (result.candidates.length > 0) {
-        const dataUrl = await fetchImageUrlAsDataUrl(result.candidates[0].url);
-        setImageDataUrl(dataUrl);
+        setImageBlob(await fetchImageUrlAsBlob(result.candidates[0].url));
       }
     } catch (err: unknown) {
       setUrlError(err instanceof Error ? err.message : 'Failed to fetch floorplan from URL.');
@@ -161,11 +179,29 @@ export const ImportModal: React.FC<ImportModalProps> = ({
 
   useEffect(() => {
     if (!isOpen) return;
-    prewarmBrowserMl()
-      .then((backend) => setMlBackend(backend))
-      .catch(() => {});
-    prewarmOcrWorker().catch(() => {});
+    // Let the dialog paint before GPU setup starts competing with it for the GPU, then
+    // load the model before the OCR worker rather than both at once.
+    setImportDialogOpen(true);
+    let cancelled = false;
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
+        if (cancelled) return;
+        prewarmBrowserMl()
+          .then((backend) => {
+            if (!cancelled) setMlBackend(backend);
+          })
+          .catch(() => {})
+          .finally(() => {
+            if (!cancelled) prewarmOcrWorker().catch(() => {});
+          });
+      });
+    });
     return () => {
+      cancelled = true;
+      setImportDialogOpen(false);
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
       // Phones free the model's ~200 MB right away so the tab isn't killed.
       if (window.matchMedia('(pointer: coarse)').matches) {
         releaseBrowserMlSession().catch(() => {});
@@ -177,16 +213,21 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   }, [isOpen]);
 
   useEffect(() => {
-    if (!imageDataUrl) {
+    // Never show the previous image's result over a new image.
+    setParseResult(null);
+    setParseError(null);
+    if (!imageUrl) {
       setLoadedImageEl(null);
-      setParseResult(null);
+      setImagePixels(null);
       setOcrCandidates([]);
       setRoomCandidates([]);
       setOcrTextBoxes([]);
       return;
     }
+    let cancelled = false;
     const img = new Image();
     img.onload = () => {
+      if (cancelled) return;
       try {
         const c = document.createElement('canvas');
         const sw = Math.min(128, img.naturalWidth || img.width || 128);
@@ -206,10 +247,28 @@ export const ImportModal: React.FC<ImportModalProps> = ({
       } catch (err) {
         console.warn('Blueprint auto-detect warning:', err);
       }
+
+      const naturalW = img.naturalWidth || img.width || 600;
+      const naturalH = img.naturalHeight || img.height || 450;
+      const downscale = Math.min(1, MAX_PROC_DIM / Math.max(naturalW, naturalH));
+      const w = Math.max(64, Math.round(naturalW * downscale));
+      const h = Math.max(64, Math.round(naturalH * downscale));
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d')!;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, w, h);
+      ctx.drawImage(img, 0, 0, w, h);
+
+      setImagePixels({ rgba: ctx.getImageData(0, 0, w, h).data, w, h });
       setLoadedImageEl(img);
     };
-    img.src = imageDataUrl;
-  }, [imageDataUrl]);
+    img.src = imageUrl;
+    return () => {
+      cancelled = true;
+    };
+  }, [imageUrl]);
 
   useEffect(() => {
     if (!loadedImageEl) return;
@@ -244,10 +303,10 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     setMlError(null);
     mlRunningRef.current = false;
     mlRunIdRef.current += 1;
-  }, [loadedImageEl, options.invert]);
+  }, [imagePixels, options.invert]);
 
   useEffect(() => {
-    if (!loadedImageEl) {
+    if (!imagePixels) {
       setIsRunningMl(false);
       return;
     }
@@ -266,22 +325,8 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     setIsRunningMl(true);
     const runId = mlRunIdRef.current;
 
-    const naturalW = loadedImageEl.naturalWidth || loadedImageEl.width || 600;
-    const naturalH = loadedImageEl.naturalHeight || loadedImageEl.height || 450;
-    const downscale = Math.min(1, MAX_PROC_DIM / Math.max(naturalW, naturalH));
-    const w = Math.max(64, Math.round(naturalW * downscale));
-    const h = Math.max(64, Math.round(naturalH * downscale));
-
-    const canvas = document.createElement('canvas');
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext('2d')!;
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, w, h);
-    ctx.drawImage(loadedImageEl, 0, 0, w, h);
-    const imgData = ctx.getImageData(0, 0, w, h);
-
-    segmentFloorplanMlBrowser(imgData.data, w, h, options, ocrTextBoxes)
+    const { rgba, w, h } = imagePixels;
+    segmentFloorplanMlBrowser(rgba, w, h, options, ocrTextBoxes)
       .then((masks) => {
         if (mlRunIdRef.current === runId) {
           setMlMasks(masks);
@@ -299,27 +344,51 @@ export const ImportModal: React.FC<ImportModalProps> = ({
           setIsRunningMl(false);
         }
       });
-  }, [loadedImageEl, mlMasks, mlError, options.invert]);
+  }, [imagePixels, mlMasks, mlError, options.invert]);
 
   // Classic CV is used only as an automatic fallback when the model fails.
   useEffect(() => {
-    if (!loadedImageEl) return;
+    if (!imagePixels) {
+      setIsParsing(false);
+      return;
+    }
     // On the GPU the ML masks arrive within a second; skip the interim non-ML parse.
     if (!mlMasks && !mlError && mlBackend === 'webgpu') {
       setParseResult(null);
+      setIsParsing(false);
       return;
     }
-    const res = parseFloorplanImage(
-      loadedImageEl,
+    let cancelled = false;
+    setIsParsing(true);
+    parseFloorplanInWorker({
+      rgba: imagePixels.rgba,
+      w: imagePixels.w,
+      h: imagePixels.h,
       options,
       ocrCandidates,
       useOcrScale,
       roomCandidates,
       ocrTextBoxes,
-      mlMasks ?? undefined
-    );
-    setParseResult(res);
-  }, [loadedImageEl, options, ocrCandidates, useOcrScale, roomCandidates, ocrTextBoxes, mlMasks, mlError, mlBackend]);
+      masks: mlMasks ?? undefined,
+    })
+      .then((res) => {
+        if (cancelled) return;
+        setParseResult(res);
+        setParseError(null);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.warn('Floorplan parse failed:', err);
+        setParseResult(null);
+        setParseError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (!cancelled) setIsParsing(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [imagePixels, options, ocrCandidates, useOcrScale, roomCandidates, ocrTextBoxes, mlMasks, mlError, mlBackend]);
 
   if (!isOpen) return null;
 
@@ -332,8 +401,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     setIsLoadingUrl(true);
     setUrlError(null);
     try {
-      const dataUrl = await fetchImageUrlAsDataUrl(candidateUrl);
-      setImageDataUrl(dataUrl);
+      setImageBlob(await fetchImageUrlAsBlob(candidateUrl));
     } catch (err: unknown) {
       setUrlError(err instanceof Error ? err.message : 'Could not load selected image from page.');
     } finally {
@@ -344,12 +412,27 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   const handleLoadSample = () => {
     setUrlError(null);
     setUrlCandidates([]);
-    const sampleUrl = createSampleBlueprintDataUrl();
-    setImageDataUrl(sampleUrl);
+    createSampleBlueprintBlob()
+      .then(setImageBlob)
+      .catch((err) => setUrlError(err instanceof Error ? err.message : String(err)));
   };
 
-  const handleApplyImport = () => {
-    if (!parseResult || !imageDataUrl) return;
+  const handleApplyImport = async () => {
+    if (!parseResult || !imageBlob || isApplying) return;
+
+    // Store the image before applying, so a reload right after can't lose it.
+    let imageId: string | null = null;
+    if (includeUnderlay) {
+      setIsApplying(true);
+      try {
+        imageId = await storeUnderlayImage(imageBlob);
+      } catch (err) {
+        setIsApplying(false);
+        setUrlError(`Could not save the image: ${err instanceof Error ? err.message : String(err)}`);
+        return;
+      }
+      setIsApplying(false);
+    }
 
     const newState: FloorplanState = {
       ...state,
@@ -361,9 +444,9 @@ export const ImportModal: React.FC<ImportModalProps> = ({
       textBoxes: keepExistingFurniture ? state.textBoxes : [],
       measurements: [],
       roomLabels: [],
-      background: includeUnderlay
+      background: imageId
         ? {
-            dataUrl: imageDataUrl,
+            imageId,
             x: parseResult.originOffset.x,
             y: parseResult.originOffset.y,
             width: parseResult.boundsCm.width,
@@ -380,14 +463,16 @@ export const ImportModal: React.FC<ImportModalProps> = ({
 
   const hasExistingFurniture =
     state.furniture.length > 0 || (state.textBoxes?.length ?? 0) > 0;
-  const isBusy = isRunningMl || isScanningOcr;
+  const isBusy = isRunningMl || isScanningOcr || isParsing || isApplying;
   const busyLabel = isRunningMl
     ? mlBackend
       ? 'Running model…'
       : 'Loading model…'
     : isScanningOcr
       ? 'Reading dimensions…'
-      : null;
+      : isParsing
+        ? 'Detecting walls…'
+        : null;
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -503,7 +588,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
               </div>
             )}
 
-            {imageDataUrl && (
+            {imageUrl && (
               <div className="import-config-card">
                 {mlError && (
                   <div className="import-alert" role="status">
@@ -561,14 +646,19 @@ export const ImportModal: React.FC<ImportModalProps> = ({
 
           <div className="import-preview-col">
             <div className="preview-stage">
-              {!imageDataUrl ? (
+              {!imageUrl ? (
                 <div className="preview-empty">
                   <FileImage size={36} className="text-slate-300" />
                   <p>Your floorplan preview will appear here</p>
                 </div>
+              ) : !parseResult && parseError ? (
+                <div className="preview-empty" role="alert">
+                  <AlertCircle size={32} className="text-slate-300" />
+                  <p>Couldn't detect a floorplan in this image. Try a clearer or larger image.</p>
+                </div>
               ) : !parseResult ? (
                 <div className="preview-pending">
-                  <img src={imageDataUrl} alt="" className="preview-pending-img" />
+                  <img src={imageUrl} alt="" className="preview-pending-img" />
                   <div className="preview-pending-status" role="status">
                     <Loader2 size={14} className="spin" />
                     <span>{busyLabel ?? 'Detecting walls…'}</span>
@@ -583,7 +673,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                   preserveAspectRatio="xMidYMid meet"
                 >
                   <image
-                    href={imageDataUrl}
+                    href={imageUrl}
                     x={parseResult.originOffset.x}
                     y={parseResult.originOffset.y}
                     width={parseResult.boundsCm.width}

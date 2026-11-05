@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
+import { useUnderlayUrl } from '../utils/underlayStore.ts';
 import {
   FloorplanState,
   ToolMode,
@@ -97,6 +98,8 @@ export const FloorplanCanvas: React.FC<Props> = ({
   fitViewToken = 0,
 }) => {
   const svgRef = useRef<SVGSVGElement | null>(null);
+  const underlayUrl = useUnderlayUrl(state.background?.imageId);
+  const underlayHref = underlayUrl ?? state.background?.dataUrl ?? null;
 
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState<Point>({ x: 0, y: 0 });
@@ -1552,9 +1555,9 @@ export const FloorplanCanvas: React.FC<Props> = ({
         <g transform={`translate(${pan.x}, ${pan.y}) scale(${zoom})`}>
           <rect x="-5000" y="-5000" width="10000" height="10000" fill="url(#majorGrid)" />
 
-          {state.background && state.background.visible && (
+          {state.background && state.background.visible && underlayHref && (
             <image
-              href={state.background.dataUrl}
+              href={underlayHref}
               x={state.background.x}
               y={state.background.y}
               width={state.background.width}

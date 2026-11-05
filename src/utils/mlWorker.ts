@@ -7,6 +7,7 @@ import {
   ML_MODEL_INPUT_SIZE,
   CPU_MODEL_PART_URLS,
   GPU_MODEL_PART_URLS,
+  canUseWebGpu,
   type MlBackend,
 } from './mlSegmenter.ts';
 import type { ParseOptions, OcrTextBoxPx } from './floorplanParser.ts';
@@ -29,25 +30,6 @@ async function timed<T>(label: string, fn: () => Promise<T>): Promise<T> {
   const result = await fn();
   console.debug(`[ml] ${label}: ${Math.round(performance.now() - start)} ms`);
   return result;
-}
-
-type GpuAdapterLike = { features: { has(name: string): boolean } };
-type GpuLike = { requestAdapter(options?: object): Promise<GpuAdapterLike | null> };
-
-async function canUseWebGpu(): Promise<boolean> {
-  const gpu = (navigator as { gpu?: GpuLike }).gpu;
-  if (!gpu) return false;
-  try {
-    const adapter = await withTimeout(
-      gpu.requestAdapter({ powerPreference: 'low-power' }),
-      5_000,
-      'WebGPU adapter request'
-    );
-    return !!adapter?.features.has('shader-f16');
-  } catch (err) {
-    console.warn(err);
-    return false;
-  }
 }
 
 let loaded: LoadedSession | null = null;
