@@ -137,23 +137,6 @@ async function runLogits(
   return (outputs.logits ?? Object.values(outputs)[0]).data as Float32Array;
 }
 
-function flipRgbaHorizontal(rgba: Uint8Array, w: number, h: number): Uint8Array {
-  const out = new Uint8Array(rgba.length);
-  for (let y = 0; y < h; y++) {
-    const row = y * w * 4;
-    for (let x = 0; x < w; x++) {
-      const s = row + x * 4;
-      const d = row + (w - 1 - x) * 4;
-      out[d] = rgba[s];
-      out[d + 1] = rgba[s + 1];
-      out[d + 2] = rgba[s + 2];
-      out[d + 3] = rgba[s + 3];
-    }
-  }
-  return out;
-}
-
-// Flip test-time augmentation only on WebGPU; on the CPU it would double a ~15 s run.
 async function segmentLogits(
   s: LoadedSession,
   rgba: Uint8Array,
@@ -161,29 +144,10 @@ async function segmentLogits(
   h: number,
   invert: boolean
 ): Promise<Float32Array> {
-  const logits = await runLogits(s, rgba, w, h, invert);
-  if (s.backend !== 'webgpu') return logits;
-
-  try {
-    const flipped = await runLogits(s, flipRgbaHorizontal(rgba, w, h), w, h, invert);
-    const planeSize = N * N;
-    const copyW = Math.min(w, N);
-    const copyH = Math.min(h, N);
-    const merged = new Float32Array(logits);
-    for (let c = 0; c < 4; c++) {
-      const cOff = c * planeSize;
-      for (let y = 0; y < copyH; y++) {
-        const row = cOff + y * N;
-        for (let x = 0; x < copyW; x++) {
-          merged[row + x] = (logits[row + x] + flipped[row + (copyW - 1 - x)]) * 0.5;
-        }
-      }
-    }
-    return merged;
-  } catch (err) {
-    console.warn('Flip TTA failed, using single pass:', err);
-    return logits;
-  }
+  // Single pass. Flip test-time augmentation was measured on 255 held-out plans (2026-11-13) and gave no
+  // significant gain on any metric, so it isn't worth a second model run (mergeFlippedLogits is kept for eval).
+  void s.backend;
+  return runLogits(s, rgba, w, h, invert);
 }
 
 let executionQueue: Promise<void> = Promise.resolve();

@@ -1,4 +1,5 @@
 import Tesseract from 'tesseract.js';
+import { detectRooms, refreshRoomLabels, type DetectedRoom } from './roomDetection.ts';
 import type {
   Wall,
   Door,
@@ -76,6 +77,8 @@ export interface ParseResult {
   detectedDimensions: DetectedDimension[];
   autoCalibratedWidthMeters: number | null;
   detectedUnit: Unit | null;
+  /** Rooms enclosed by the parsed walls, with interior extents and OCR names when found */
+  rooms: DetectedRoom[];
 }
 
 export interface RawSegment {
@@ -1552,7 +1555,9 @@ function matchDimensionsToPixelWalls(
   wallMask?: Uint8Array | null,
   maskWidth?: number,
   maskHeight?: number,
-  ocrTextBoxes: OcrTextBoxPx[] = []
+  ocrTextBoxes: OcrTextBoxPx[] = [],
+  /** Independent scale estimate (door sizes); OCR room labels far from it (> ±35%) are not trusted */
+  priorCmPerPx: number | null = null
 ): {
   matched: DetectedDimension[];
   calibratedWidthMeters: number | null;
@@ -1684,6 +1689,8 @@ function matchDimensionsToPixelWalls(
     scaleY: number;
     areaPx: number;
     diff: number;
+    /** From a lone length matched to the nearest wall; less reliable than a room's "W x D" label */
+    single?: boolean;
   }
 
   const verifiedRooms: VerifiedRoomScale[] = [];
@@ -1918,6 +1925,7 @@ function matchDimensionsToPixelWalls(
             scaleY: scale,
             areaPx: lenPx * lenPx * 0.5,
             diff: 0.05,
+            single: true,
           });
           prelimMatched.push({
             cand,
@@ -1939,12 +1947,31 @@ function matchDimensionsToPixelWalls(
   let cmPerPxX: number | null = null;
   let cmPerPxY: number | null = null;
 
-  if (verifiedRooms.length > 0) {
-    const largestRoom = verifiedRooms.reduce((a, b) => (b.areaPx > a.areaPx ? b : a));
-    const inliers = verifiedRooms.filter(
-      (r) => Math.abs(r.scale - largestRoom.scale) / largestRoom.scale <= 0.18
-    );
-    const activeRooms = inliers.length > 0 ? inliers : verifiedRooms;
+  // Room "W x D" labels decide the scale; lone lengths (often OCR fragments or overall dimension lines matched to
+  // the wrong wall) are used only when no room label could be verified.
+  const nearPrior = (sc: number) => priorCmPerPx === null || Math.abs(Math.log(sc / priorCmPerPx)) <= Math.log(1.35);
+  const pairRooms = verifiedRooms.filter((r) => !r.single && nearPrior(r.scale));
+  const scaleRooms = pairRooms.length > 0 ? pairRooms : verifiedRooms.filter((r) => nearPrior(r.scale));
+  if (scaleRooms.length > 0) {
+    // Consensus: the scale most labels agree on (±12%), ties broken by evidence weight, then closeness to the prior.
+    const weightOf = (r: VerifiedRoomScale) => r.areaPx / (0.005 + r.diff * r.diff);
+    let bestCluster: VerifiedRoomScale[] = [];
+    let bestKey = [-1, -1, -Infinity];
+    for (const c of scaleRooms) {
+      const members = scaleRooms.filter((r) => Math.abs(r.scale - c.scale) / c.scale <= 0.12);
+      const key = [
+        members.length,
+        members.reduce((a, r) => a + weightOf(r), 0),
+        priorCmPerPx === null ? 0 : -Math.abs(Math.log(c.scale / priorCmPerPx)),
+      ];
+      const better =
+        key[0] > bestKey[0] || (key[0] === bestKey[0] && (key[1] > bestKey[1] * 1.5 || (key[1] >= bestKey[1] / 1.5 && key[2] > bestKey[2])));
+      if (better) {
+        bestKey = key;
+        bestCluster = members;
+      }
+    }
+    const activeRooms = bestCluster;
 
     let sumW = 0;
     let sumScale = 0;
@@ -1982,10 +2009,18 @@ function matchDimensionsToPixelWalls(
       }
     }
   } else if (fallbackAxisScales.length > 0) {
-    const allScales = fallbackAxisScales.flatMap((f) => f.scales).sort((a, b) => a - b);
-    if (allScales.length > 0) {
-      const mid = Math.floor(allScales.length / 2);
-      medianCmPerPx = allScales[mid];
+    // No room label fit cleanly. Only trust a scale that at least two different labels agree on (within 10%);
+    // otherwise leave it to the door-size fallback rather than guess from one shaky measurement.
+    let best: { s: number; votes: number } | null = null;
+    for (const f of fallbackAxisScales) {
+      for (const s of f.scales) {
+        if (!nearPrior(s)) continue;
+        const votes = fallbackAxisScales.filter((g) => g !== f && g.scales.some((t) => Math.abs(t - s) / s <= 0.1)).length;
+        if (votes >= 1 && (!best || votes > best.votes)) best = { s, votes };
+      }
+    }
+    if (best) {
+      medianCmPerPx = best.s;
       cmPerPxX = medianCmPerPx;
       cmPerPxY = medianCmPerPx;
     }
@@ -2056,65 +2091,181 @@ export function parseRoomNameText(text: string): string | null {
   return null;
 }
 
-let cachedOcrWorker: Tesseract.Worker | null = null;
-let ocrWorkerPromise: Promise<Tesseract.Worker> | null = null;
+/**
+ * OCR runs the image as overlapping bands on parallel workers when the device has cores to spare
+ * (see ocrTileBands); 1 = whole image on a single worker.
+ */
+export const OCR_BANDS =
+  typeof navigator !== 'undefined' && (navigator.hardwareConcurrency || 2) >= 4 ? 2 : 1;
 
-async function getOcrWorker(): Promise<Tesseract.Worker> {
-  if (cachedOcrWorker) return cachedOcrWorker;
-  if (ocrWorkerPromise) return ocrWorkerPromise;
+let cachedOcrWorkers: Tesseract.Worker[] | null = null;
+let ocrWorkersPromise: Promise<Tesseract.Worker[]> | null = null;
 
-  ocrWorkerPromise = (async () => {
-    const worker = await Tesseract.createWorker('eng');
-    await worker.setParameters({
-      tessedit_pageseg_mode: Tesseract.PSM.SPARSE_TEXT,
-    });
-    cachedOcrWorker = worker;
-    return worker;
-  })();
+async function createOcrWorker(): Promise<Tesseract.Worker> {
+  const worker = await Tesseract.createWorker('eng');
+  await worker.setParameters({
+    tessedit_pageseg_mode: Tesseract.PSM.SPARSE_TEXT,
+  });
+  return worker;
+}
+
+async function getOcrWorkers(): Promise<Tesseract.Worker[]> {
+  if (cachedOcrWorkers) return cachedOcrWorkers;
+  if (ocrWorkersPromise) return ocrWorkersPromise;
+
+  ocrWorkersPromise = Promise.all(Array.from({ length: OCR_BANDS }, () => createOcrWorker())).then((ws) => {
+    cachedOcrWorkers = ws;
+    return ws;
+  });
 
   try {
-    return await ocrWorkerPromise;
+    return await ocrWorkersPromise;
   } catch (err) {
-    ocrWorkerPromise = null;
+    ocrWorkersPromise = null;
     throw err;
   }
 }
 
 export async function prewarmOcrWorker(): Promise<void> {
-  await getOcrWorker();
+  await getOcrWorkers();
 }
 
 export async function terminateOcrWorker(): Promise<void> {
-  if (cachedOcrWorker) {
-    const w = cachedOcrWorker;
-    cachedOcrWorker = null;
-    ocrWorkerPromise = null;
-    try {
-      await w.terminate();
-    } catch {}
+  if (cachedOcrWorkers) {
+    const ws = cachedOcrWorkers;
+    cachedOcrWorkers = null;
+    ocrWorkersPromise = null;
+    await Promise.all(ws.map((w) => w.terminate().catch(() => {})));
   }
+}
+
+export interface OcrCandidates {
+  dimensions: RawDimensionCandidate[];
+  roomNames: RawRoomNameCandidate[];
+  textBoxes: OcrTextBoxPx[];
+}
+
+/** Size of the image handed to OCR: small images are upscaled (to ~1200 px), large ones capped at 1600 px. */
+export function ocrInputSize(naturalW: number, naturalH: number): { w: number; h: number } {
+  const maxNatural = Math.max(naturalW, naturalH);
+  const ocrScale =
+    maxNatural < 900 ? Math.min(2.0, 1200 / maxNatural) : Math.min(1.0, 1600 / maxNatural);
+  return {
+    w: Math.max(120, Math.round(naturalW * ocrScale)),
+    h: Math.max(120, Math.round(naturalH * ocrScale)),
+  };
+}
+
+interface OcrLineLike {
+  text: string;
+  bbox?: { x0: number; y0: number; x1: number; y1: number } | null;
+}
+
+/**
+ * Turn OCR lines (in OCR-image pixels) into dimension, room-name and text-box candidates in processing pixels.
+ * Pure, so the browser path and the Node benchmark share it.
+ */
+export function ocrLinesToCandidates(
+  lines: OcrLineLike[],
+  ocrW: number,
+  ocrH: number,
+  naturalW: number,
+  naturalH: number
+): OcrCandidates {
+  const procDownscale = Math.min(1, MAX_PROC_DIM / Math.max(naturalW, naturalH));
+  const procW = Math.max(64, Math.round(naturalW * procDownscale));
+  const procH = Math.max(64, Math.round(naturalH * procDownscale));
+  const dimensions: RawDimensionCandidate[] = [];
+  const roomNames: RawRoomNameCandidate[] = [];
+  const textBoxes: OcrTextBoxPx[] = [];
+
+  for (const line of lines) {
+    if (!line.bbox) continue;
+    const x0Px = Math.floor((line.bbox.x0 / ocrW) * procW);
+    const y0Px = Math.floor((line.bbox.y0 / ocrH) * procH);
+    const x1Px = Math.ceil((line.bbox.x1 / ocrW) * procW);
+    const y1Px = Math.ceil((line.bbox.y1 / ocrH) * procH);
+    const cxPx = (x0Px + x1Px) / 2;
+    const cyPx = (y0Px + y1Px) / 2;
+
+    if (/[a-zA-Z0-9]{2,}/.test(line.text) && y1Px - y0Px < procH * 0.12) {
+      textBoxes.push({ x0: x0Px, y0: y0Px, x1: x1Px, y1: y1Px });
+    }
+
+    const roomName = parseRoomNameText(line.text);
+    if (roomName) roomNames.push({ name: roomName, cxPx, cyPx });
+
+    const parsedDim = parseDimensionText(line.text);
+    if (parsedDim) {
+      dimensions.push({
+        rawText: parsedDim.matchedText,
+        kind: parsedDim.kind,
+        unit: parsedDim.unit,
+        val1Cm: parsedDim.val1Cm,
+        val2Cm: parsedDim.val2Cm,
+        cxPx,
+        cyPx,
+      });
+    }
+  }
+  return { dimensions, roomNames, textBoxes };
+}
+
+/**
+ * Overlapping horizontal bands for parallel OCR. Each band is recognised by its own worker; the overlap
+ * (>= 60 px, ~6% of height) keeps text on a seam whole in at least one band.
+ */
+export function ocrTileBands(h: number, tiles: number): { top: number; bottom: number }[] {
+  if (tiles <= 1 || h < 500) return [{ top: 0, bottom: h }];
+  const ov = Math.max(60, Math.round(h * 0.06));
+  const step = h / tiles;
+  return Array.from({ length: tiles }, (_, i) => ({
+    top: Math.max(0, Math.round(i * step) - ov),
+    bottom: Math.min(h, Math.round((i + 1) * step) + ov),
+  }));
+}
+
+/** Shift each band's lines into full-image coordinates and drop duplicates read in two bands (bbox IoU > 0.3). */
+export function mergeOcrBandLines(bandLines: OcrLineLike[][], tops: number[]): OcrLineLike[] {
+  const out: { line: OcrLineLike; b: { x0: number; y0: number; x1: number; y1: number } }[] = [];
+  const iou = (p: { x0: number; y0: number; x1: number; y1: number }, q: typeof p) => {
+    const iw = Math.min(p.x1, q.x1) - Math.max(p.x0, q.x0);
+    const ih = Math.min(p.y1, q.y1) - Math.max(p.y0, q.y0);
+    if (iw <= 0 || ih <= 0) return 0;
+    const i = iw * ih;
+    return i / ((p.x1 - p.x0) * (p.y1 - p.y0) + (q.x1 - q.x0) * (q.y1 - q.y0) - i);
+  };
+  bandLines.forEach((lines, k) => {
+    for (const line of lines) {
+      if (!line.bbox) continue;
+      const b = { ...line.bbox, y0: line.bbox.y0 + tops[k], y1: line.bbox.y1 + tops[k] };
+      if (out.some((o) => iou(o.b, b) > 0.3)) continue;
+      out.push({ line: { ...line, bbox: b }, b });
+    }
+  });
+  return out.map((o) => o.line);
+}
+
+/** Flatten tesseract.js blocks into lines. */
+export function ocrBlocksToLines(
+  blocks: { paragraphs?: { lines?: OcrLineLike[] }[] }[] | null | undefined
+): OcrLineLike[] {
+  const out: OcrLineLike[] = [];
+  for (const block of blocks || []) {
+    for (const para of block.paragraphs || []) {
+      for (const line of para.lines || []) out.push(line);
+    }
+  }
+  return out;
 }
 
 export async function extractOcrDimensionsFromImage(
   img: HTMLImageElement,
   invert = false
-): Promise<{
-  dimensions: RawDimensionCandidate[];
-  roomNames: RawRoomNameCandidate[];
-  textBoxes: OcrTextBoxPx[];
-}> {
+): Promise<OcrCandidates> {
   const naturalW = img.naturalWidth || img.width || 600;
   const naturalH = img.naturalHeight || img.height || 450;
-
-  const maxNatural = Math.max(naturalW, naturalH);
-  const ocrScale =
-    maxNatural < 900 ? Math.min(2.0, 1200 / maxNatural) : Math.min(1.0, 1600 / maxNatural);
-  const ocrW = Math.max(120, Math.round(naturalW * ocrScale));
-  const ocrH = Math.max(120, Math.round(naturalH * ocrScale));
-
-  const procDownscale = Math.min(1, MAX_PROC_DIM / Math.max(naturalW, naturalH));
-  const procW = Math.max(64, Math.round(naturalW * procDownscale));
-  const procH = Math.max(64, Math.round(naturalH * procDownscale));
+  const { w: ocrW, h: ocrH } = ocrInputSize(naturalW, naturalH);
 
   const canvas = document.createElement('canvas');
   canvas.width = ocrW;
@@ -2134,45 +2285,34 @@ export async function extractOcrDimensionsFromImage(
     ctx.putImageData(data, 0, 0);
   }
 
-  const worker = await getOcrWorker();
-  const result = await worker.recognize(canvas, {}, { blocks: true });
-  const dimensions: RawDimensionCandidate[] = [];
-  const roomNames: RawRoomNameCandidate[] = [];
-  const textBoxes: OcrTextBoxPx[] = [];
-
-  const blocks = result.data?.blocks || [];
-  for (const block of blocks) {
-    for (const para of block.paragraphs || []) {
-      for (const line of para.lines || []) {
-        if (!line.bbox) continue;
-        const x0Px = Math.floor((line.bbox.x0 / ocrW) * procW);
-        const y0Px = Math.floor((line.bbox.y0 / ocrH) * procH);
-        const x1Px = Math.ceil((line.bbox.x1 / ocrW) * procW);
-        const y1Px = Math.ceil((line.bbox.y1 / ocrH) * procH);
-        const cxPx = (x0Px + x1Px) / 2;
-        const cyPx = (y0Px + y1Px) / 2;
-
-        if (/[a-zA-Z0-9]{2,}/.test(line.text) && y1Px - y0Px < procH * 0.12) {
-          textBoxes.push({ x0: x0Px, y0: y0Px, x1: x1Px, y1: y1Px });
-        }
-
-        const parsedDim = parseDimensionText(line.text);
-        if (parsedDim) {
-          dimensions.push({
-            rawText: parsedDim.matchedText,
-            kind: parsedDim.kind,
-            unit: parsedDim.unit,
-            val1Cm: parsedDim.val1Cm,
-            val2Cm: parsedDim.val2Cm,
-            cxPx,
-            cyPx,
-          });
-        }
-      }
-    }
+  const t0 = performance.now();
+  const workers = await getOcrWorkers();
+  const t1 = performance.now();
+  const bands = ocrTileBands(ocrH, workers.length);
+  let lines: OcrLineLike[];
+  if (bands.length === 1) {
+    const result = await workers[0].recognize(canvas, {}, { blocks: true });
+    lines = ocrBlocksToLines(result.data?.blocks);
+  } else {
+    const results = await Promise.all(
+      bands.map((b, k) => {
+        const band = document.createElement('canvas');
+        band.width = ocrW;
+        band.height = b.bottom - b.top;
+        band.getContext('2d')!.drawImage(canvas, 0, b.top, ocrW, band.height, 0, 0, ocrW, band.height);
+        return workers[k].recognize(band, {}, { blocks: true });
+      })
+    );
+    lines = mergeOcrBandLines(
+      results.map((r) => ocrBlocksToLines(r.data?.blocks)),
+      bands.map((b) => b.top)
+    );
   }
-
-  return { dimensions, roomNames, textBoxes };
+  const t2 = performance.now();
+  console.debug(
+    `[ocr] workers ready: ${Math.round(t1 - t0)} ms, recognize ${ocrW}x${ocrH} in ${bands.length} band(s): ${Math.round(t2 - t1)} ms`
+  );
+  return ocrLinesToCandidates(lines, ocrW, ocrH, naturalW, naturalH);
 }
 
 export function carveOpeningsFromWalls(
@@ -2182,9 +2322,10 @@ export function carveOpeningsFromWalls(
 ): Wall[] {
   if (openings.length === 0 || walls.length === 0) return walls;
   const resultWalls: Wall[] = [];
-  let nextId = 1;
 
   for (const w of walls) {
+    // Pieces are named after their parent wall so ids stay unique next to walls that weren't cut.
+    let nextId = 1;
     const isH = Math.abs(w.end.x - w.start.x) >= Math.abs(w.end.y - w.start.y);
     const pos = isH ? Math.round((w.start.y + w.end.y) / 2) : Math.round((w.start.x + w.end.x) / 2);
     const wStart = isH ? Math.min(w.start.x, w.end.x) : Math.min(w.start.y, w.end.y);
@@ -2225,7 +2366,7 @@ export function carveOpeningsFromWalls(
     for (const cut of mergedCuts) {
       if (cut.start - cur >= minWallLengthCm) {
         resultWalls.push({
-          id: `w_imp_${nextId++}`,
+          id: `${w.id}_${nextId++}`,
           start: isH ? { x: cur, y: pos } : { x: pos, y: cur },
           end: isH ? { x: cut.start, y: pos } : { x: pos, y: cut.start },
           thickness: w.thickness,
@@ -2235,7 +2376,7 @@ export function carveOpeningsFromWalls(
     }
     if (wEnd - cur >= minWallLengthCm) {
       resultWalls.push({
-        id: `w_imp_${nextId++}`,
+        id: `${w.id}_${nextId++}`,
         start: isH ? { x: cur, y: pos } : { x: pos, y: cur },
         end: isH ? { x: wEnd, y: pos } : { x: pos, y: wEnd },
         thickness: w.thickness,
@@ -2260,7 +2401,13 @@ export function regularizeFloorplanGraph(
   cmPerPxY: number = cmPerPx,
   mlDoorMask?: Uint8Array,
   mlWindowMask?: Uint8Array
-): { walls: Wall[]; doors: Door[]; windows: WindowItem[] } {
+): {
+  walls: Wall[];
+  doors: Door[];
+  windows: WindowItem[];
+  passages: Array<{ x: number; y: number; width: number; rotation: number }>;
+} {
+  const passagesOut: Array<{ x: number; y: number; width: number; rotation: number }> = [];
   const useHeuristicOpenings =
     detectOpenings && !mlDoorMask && !mlWindowMask;
   const pxToCm = (px: number) => Math.round(px * cmPerPx);
@@ -4031,15 +4178,36 @@ export function regularizeFloorplanGraph(
       }
     }
 
+    passagesOut.push(...openPassages);
     if (openPassages.length > 0) {
       const carvedPassages = carveOpeningsFromWalls(walls, openPassages);
       walls.length = 0;
       walls.push(...carvedPassages);
+      // Re-link doors/windows whose wall was cut to the piece they sit on.
+      const byId = new Set(walls.map((wl) => wl.id));
+      for (const op of [...doors, ...windows]) {
+        if (!op.wallId || byId.has(op.wallId)) continue;
+        const pieces = walls.filter((wl) => wl.id.startsWith(`${op.wallId}_`));
+        let best: Wall | null = null;
+        let bestD = Infinity;
+        for (const pc of pieces) {
+          const mx = Math.max(Math.min(op.x, Math.max(pc.start.x, pc.end.x)), Math.min(pc.start.x, pc.end.x));
+          const my = Math.max(Math.min(op.y, Math.max(pc.start.y, pc.end.y)), Math.min(pc.start.y, pc.end.y));
+          const d = Math.hypot(op.x - mx, op.y - my);
+          if (d < bestD) {
+            bestD = d;
+            best = pc;
+          }
+        }
+        op.wallId = best?.id;
+      }
     }
   }
 
-  const cleanedWalls = carveOpeningsFromWalls(walls, [...doors, ...windows]);
-  return { walls: cleanedWalls, doors, windows };
+  // Walls stay continuous through doors and windows (each opening is drawn over its wall, linked by wallId), so a
+  // wall with a door is one editable piece and deleting the door doesn't leave a hole. Doorless passages, which
+  // have no object to draw over them, were carved above.
+  return { walls, doors, windows, passages: passagesOut };
 }
 
 export function segmentFloorplanOtsu(
@@ -4278,6 +4446,65 @@ export function segmentFloorplanOtsu(
   };
 }
 
+/**
+ * Scale fallback when OCR finds no dimensions: the door at this percentile of detected door spans is assumed
+ * to be this wide.
+ */
+export const DOOR_PRIOR = { widthCm: 82, percentile: 0.4 };
+
+/** Long-side span (px) of each door blob in the door mask (8-connected, >= 10 px, span 12-95 px), sorted. */
+export function measureDoorSpansPx(dm: Uint8Array, w: number, h: number): number[] {
+  const visited = new Uint8Array(w * h);
+  const q = new Int32Array(w * h);
+  const doorSpansPx: number[] = [];
+  for (let y = 0; y < h; y++) {
+    const rowOff = y * w;
+    for (let x = 0; x < w; x++) {
+      const sIdx = rowOff + x;
+      if (!dm[sIdx] || visited[sIdx]) continue;
+      visited[sIdx] = 1;
+      let head = 0;
+      let tail = 0;
+      q[tail++] = sIdx;
+      let minBx = x;
+      let maxBx = x;
+      let minBy = y;
+      let maxBy = y;
+      while (head < tail) {
+        const curr = q[head++];
+        const cy = Math.floor(curr / w);
+        const cx = curr - cy * w;
+        if (cx < minBx) minBx = cx;
+        if (cx > maxBx) maxBx = cx;
+        if (cy < minBy) minBy = cy;
+        if (cy > maxBy) maxBy = cy;
+        for (let dy = -1; dy <= 1; dy++) {
+          const ny = cy + dy;
+          if (ny < 0 || ny >= h) continue;
+          const nRow = ny * w;
+          for (let dx = -1; dx <= 1; dx++) {
+            if (dx === 0 && dy === 0) continue;
+            const nx = cx + dx;
+            if (nx < 0 || nx >= w) continue;
+            const nIdx = nRow + nx;
+            if (dm[nIdx] && !visited[nIdx]) {
+              visited[nIdx] = 1;
+              q[tail++] = nIdx;
+            }
+          }
+        }
+      }
+      if (tail >= 10) {
+        const spanPx = Math.max(maxBx - minBx + 1, maxBy - minBy + 1);
+        if (spanPx >= 12 && spanPx <= 95) {
+          doorSpansPx.push(spanPx);
+        }
+      }
+    }
+  }
+  return doorSpansPx.sort((a, b) => a - b);
+}
+
 export function parseFloorplanRgbaBuffer(
   rgba: Uint8ClampedArray | Uint8Array,
   w: number,
@@ -4285,7 +4512,7 @@ export function parseFloorplanRgbaBuffer(
   options: ParseOptions,
   ocrCandidates: RawDimensionCandidate[] = [],
   useOcrScale = true,
-  _roomCandidates: RawRoomNameCandidate[] = [],
+  roomCandidates: RawRoomNameCandidate[] = [],
   ocrTextBoxes: OcrTextBoxPx[] = [],
   customMasks?: SegmentationMasks
 ): ParseResult & { masks: SegmentationMasks } {
@@ -4339,74 +4566,21 @@ export function parseFloorplanRgbaBuffer(
     dominantWallThickPx
   );
 
-  const ocrMatch = matchDimensionsToPixelWalls(
-    ocrCandidates,
-    [...rawSegmentsPx, ...winBandsPx],
-    spanPxW,
-    masks.rawMask || masks.structuralMask,
-    w,
-    h,
-    ocrTextBoxes
-  );
-
+  // Rays that measure a labelled room stop at walls, windows and doors only. The raw ink mask also has furniture
+  // and text, which stopped rays early and made rooms look 2-3x too small (scale far too large).
+  const rayMask = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    if (structuralMask[i] || masks.windowMask?.[i] || masks.doorMask?.[i]) rayMask[i] = 1;
+  }
+  // Door-size scale first: it's the fallback when OCR finds no usable dimensions, and the sanity check that OCR
+  // room labels must agree with.
   let doorCalibratedCmPerPx: number | null = null;
   let doorCalibratedWidthMeters: number | null = null;
-  if (ocrMatch.cmPerPx === null && masks.doorMask) {
-    const dm = masks.doorMask;
-    const visited = new Uint8Array(w * h);
-    const q = new Int32Array(w * h);
-    const doorSpansPx: number[] = [];
-
-    for (let y = 0; y < h; y++) {
-      const rowOff = y * w;
-      for (let x = 0; x < w; x++) {
-        const sIdx = rowOff + x;
-        if (!dm[sIdx] || visited[sIdx]) continue;
-        visited[sIdx] = 1;
-        let head = 0;
-        let tail = 0;
-        q[tail++] = sIdx;
-        let minBx = x;
-        let maxBx = x;
-        let minBy = y;
-        let maxBy = y;
-        while (head < tail) {
-          const curr = q[head++];
-          const cy = Math.floor(curr / w);
-          const cx = curr - cy * w;
-          if (cx < minBx) minBx = cx;
-          if (cx > maxBx) maxBx = cx;
-          if (cy < minBy) minBy = cy;
-          if (cy > maxBy) maxBy = cy;
-          for (let dy = -1; dy <= 1; dy++) {
-            const ny = cy + dy;
-            if (ny < 0 || ny >= h) continue;
-            const nRow = ny * w;
-            for (let dx = -1; dx <= 1; dx++) {
-              if (dx === 0 && dy === 0) continue;
-              const nx = cx + dx;
-              if (nx < 0 || nx >= w) continue;
-              const nIdx = nRow + nx;
-              if (dm[nIdx] && !visited[nIdx]) {
-                visited[nIdx] = 1;
-                q[tail++] = nIdx;
-              }
-            }
-          }
-        }
-        if (tail >= 10) {
-          const spanPx = Math.max(maxBx - minBx + 1, maxBy - minBy + 1);
-          if (spanPx >= 12 && spanPx <= 95) {
-            doorSpansPx.push(spanPx);
-          }
-        }
-      }
-    }
-
+  if (masks.doorMask) {
+    const doorSpansPx = measureDoorSpansPx(masks.doorMask, w, h);
     if (doorSpansPx.length > 0) {
-      doorSpansPx.sort((a, b) => a - b);
-      const refDoorPx = doorSpansPx[Math.floor(doorSpansPx.length * 0.4)];
-      const impliedCmPerPx = 82 / refDoorPx;
+      const refDoorPx = doorSpansPx[Math.floor(doorSpansPx.length * DOOR_PRIOR.percentile)];
+      const impliedCmPerPx = DOOR_PRIOR.widthCm / refDoorPx;
       const impliedWidthM = (spanPxW * impliedCmPerPx) / 100;
       if (impliedWidthM >= 3.5 && impliedWidthM <= 45) {
         doorCalibratedCmPerPx = impliedCmPerPx;
@@ -4414,6 +4588,17 @@ export function parseFloorplanRgbaBuffer(
       }
     }
   }
+
+  const ocrMatch = matchDimensionsToPixelWalls(
+    ocrCandidates,
+    [...rawSegmentsPx, ...winBandsPx],
+    spanPxW,
+    rayMask,
+    w,
+    h,
+    ocrTextBoxes,
+    doorCalibratedCmPerPx
+  );
 
   const autoCalibratedWidthMeters =
     ocrMatch.calibratedWidthMeters ?? doorCalibratedWidthMeters;
@@ -4461,7 +4646,7 @@ export function parseFloorplanRgbaBuffer(
     ),
   }));
 
-  const { walls, doors, windows } = regularizeFloorplanGraph(
+  const { walls, doors, windows, passages } = regularizeFloorplanGraph(
     segmentsCm,
     detailMask,
     structuralMask,
@@ -4476,6 +4661,19 @@ export function parseFloorplanRgbaBuffer(
     masks.doorMask,
     masks.windowMask
   );
+
+  const rooms = detectRooms({
+    walls,
+    doors,
+    windows,
+    w,
+    h,
+    cmPerPxX,
+    cmPerPxY,
+    origin: { x: ORIGIN_OFFSET_X, y: ORIGIN_OFFSET_Y },
+    roomNames: roomCandidates,
+    passages,
+  });
 
   const detectedDimensions: DetectedDimension[] = ocrMatch.matched.map((d, idx) => ({
     ...d,
@@ -4498,6 +4696,7 @@ export function parseFloorplanRgbaBuffer(
     detectedDimensions,
     autoCalibratedWidthMeters,
     detectedUnit: ocrMatch.detectedUnit,
+    rooms,
     masks,
   };
 }
@@ -4703,6 +4902,13 @@ export function rescaleFloorplanState(
       x: scaleX(r.x),
       y: scaleY(r.y),
     })),
+    // Generated room labels move with the plan and re-measure; other text boxes keep their place as before.
+    textBoxes: refreshRoomLabels(
+      state.textBoxes?.map((t) => (t.room ? { ...t, x: scaleX(t.x), y: scaleY(t.y) } : t)),
+      state.unit,
+      state.unit,
+      scaleFactor
+    ),
     background: state.background
       ? {
           ...state.background,

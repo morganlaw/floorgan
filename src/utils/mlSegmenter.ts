@@ -261,6 +261,51 @@ export function prepareModelInputTensor(
   return input;
 }
 
+/** Mirror an RGBA image left-right (input for flip test-time augmentation). */
+export function flipRgbaHorizontal(rgba: Uint8ClampedArray | Uint8Array, w: number, h: number): Uint8Array {
+  const out = new Uint8Array(rgba.length);
+  for (let y = 0; y < h; y++) {
+    const row = y * w * 4;
+    for (let x = 0; x < w; x++) {
+      const s = row + x * 4;
+      const d = row + (w - 1 - x) * 4;
+      out[d] = rgba[s];
+      out[d + 1] = rgba[s + 1];
+      out[d + 2] = rgba[s + 2];
+      out[d + 3] = rgba[s + 3];
+    }
+  }
+  return out;
+}
+
+/**
+ * Flip TTA merge: average `logits` with logits computed on the mirrored image, un-mirroring the latter.
+ * The plan sits top-left in the N×N canvas, so only its w×h region is merged (padding is left as is).
+ */
+export function mergeFlippedLogits(
+  logits: Float32Array,
+  flipped: Float32Array,
+  w: number,
+  h: number,
+  n = ML_MODEL_INPUT_SIZE,
+  channels = 4
+): Float32Array {
+  const planeSize = n * n;
+  const copyW = Math.min(w, n);
+  const copyH = Math.min(h, n);
+  const merged = new Float32Array(logits);
+  for (let c = 0; c < channels; c++) {
+    const cOff = c * planeSize;
+    for (let y = 0; y < copyH; y++) {
+      const row = cOff + y * n;
+      for (let x = 0; x < copyW; x++) {
+        merged[row + x] = (logits[row + x] + flipped[row + (copyW - 1 - x)]) * 0.5;
+      }
+    }
+  }
+  return merged;
+}
+
 export function logitsToSegmentationMasks(
   logitsData: Float32Array,
   rgba: Uint8ClampedArray | Uint8Array,

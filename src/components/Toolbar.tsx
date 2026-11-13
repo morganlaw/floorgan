@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { FloorplanState, SelectedElementType, ToolMode, Unit } from '../types';
 import { WindowIcon } from './icons/WindowIcon';
+import { refreshRoomLabels } from '../utils/roomDetection';
 
 interface ToolbarProps {
   tool: ToolMode;
@@ -86,7 +87,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   }, [showImportHint]);
 
   const handleUnitToggle = (unit: Unit) => {
-    setState((prev) => ({ ...prev, unit }));
+    setState((prev) => ({ ...prev, unit, textBoxes: refreshRoomLabels(prev.textBoxes, prev.unit, unit) }));
   };
 
   const handleSnapToggle = () => {

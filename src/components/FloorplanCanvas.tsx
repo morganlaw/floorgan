@@ -1504,6 +1504,8 @@ export const FloorplanCanvas: React.FC<Props> = ({
   const selectedWall = selectedType === 'wall' ? state.walls.find((w) => w.id === selectedId) : null;
   const selectedFurniture = selectedType === 'furniture' ? state.furniture.find((f) => f.id === selectedId) : null;
   const selectedDoor = selectedType === 'door' ? state.doors.find((d) => d.id === selectedId) : null;
+  // Imported walls run continuously through doors; a door's white cover must span its wall's full thickness.
+  const wallThicknessById = new Map(state.walls.map((w) => [w.id, w.thickness]));
   const selectedWindow = selectedType === 'window' ? state.windows.find((w) => w.id === selectedId) : null;
   const selectedTextBox = selectedType === 'textbox' ? (state.textBoxes || []).find((t) => t.id === selectedId) : null;
 
@@ -1767,6 +1769,8 @@ export const FloorplanCanvas: React.FC<Props> = ({
             const isSelected = selectedId === door.id || selectedIds.includes(door.id);
             const halfW = door.width / 2;
             const isLeft = door.swingDirection !== 'right';
+            const coverH = Math.max(20, (wallThicknessById.get(door.wallId ?? '') ?? 0) + 2);
+            const halfH = coverH / 2;
 
             return (
               <g
@@ -1791,16 +1795,16 @@ export const FloorplanCanvas: React.FC<Props> = ({
               >
                 <rect
                   x={-halfW}
-                  y="-10"
+                  y={-halfH}
                   width={door.width}
-                  height="20"
+                  height={coverH}
                   fill="#ffffff"
                   stroke={isSelected ? '#2563eb' : '#94a3b8'}
                   strokeWidth={isSelected ? '2' : '1'}
                 />
 
-                <rect x={-halfW} y="-10" width="5" height="20" fill="#334155" />
-                <rect x={halfW - 5} y="-10" width="5" height="20" fill="#334155" />
+                <rect x={-halfW} y={-halfH} width="5" height={coverH} fill="#334155" />
+                <rect x={halfW - 5} y={-halfH} width="5" height={coverH} fill="#334155" />
 
                 {isLeft ? (
                   <>

@@ -29,6 +29,7 @@ import {
 } from '../utils/mlSegmenter.ts';
 import { parseFloorplanInWorker } from '../utils/parseClient.ts';
 import { storeUnderlayImage } from '../utils/underlayStore.ts';
+import { formatRoomLabelText, roomLabelTextBox } from '../utils/roomDetection.ts';
 
 const OCR_TIMEOUT_MS = 15_000;
 
@@ -82,6 +83,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   const [parseError, setParseError] = useState<string | null>(null);
   const [includeUnderlay, setIncludeUnderlay] = useState<boolean>(true);
   const [keepExistingFurniture, setKeepExistingFurniture] = useState<boolean>(false);
+  const [labelRooms, setLabelRooms] = useState<boolean>(true);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const mlRunningRef = useRef<boolean>(false);
@@ -434,14 +436,16 @@ export const ImportModal: React.FC<ImportModalProps> = ({
       setIsApplying(false);
     }
 
+    const unit = parseResult.detectedUnit || state.unit;
+    const roomTextBoxes = labelRooms ? parseResult.rooms.map((r) => roomLabelTextBox(r, unit)) : [];
     const newState: FloorplanState = {
       ...state,
-      unit: parseResult.detectedUnit || state.unit,
+      unit,
       walls: parseResult.walls,
       doors: parseResult.doors,
       windows: parseResult.windows,
       furniture: keepExistingFurniture ? state.furniture : [],
-      textBoxes: keepExistingFurniture ? state.textBoxes : [],
+      textBoxes: [...(keepExistingFurniture ? state.textBoxes || [] : []), ...roomTextBoxes],
       measurements: [],
       roomLabels: [],
       background: imageId
@@ -623,6 +627,18 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                   <label className="checkbox-row">
                     <input
                       type="checkbox"
+                      checked={labelRooms}
+                      onChange={(e) => setLabelRooms(e.target.checked)}
+                    />
+                    <span>
+                      Label rooms with dimensions
+                      {parseResult && parseResult.rooms.length > 0 ? ` (${parseResult.rooms.length} found)` : ''}
+                    </span>
+                  </label>
+
+                  <label className="checkbox-row">
+                    <input
+                      type="checkbox"
                       checked={includeUnderlay}
                       onChange={(e) => setIncludeUnderlay(e.target.checked)}
                     />
@@ -706,15 +722,40 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                     >
                       <rect
                         x={-d.width / 2}
-                        y={-12}
+                        y={-16}
                         width={d.width}
-                        height={24}
+                        height={32}
                         fill="#fef3c7"
                         stroke="#d97706"
                         strokeWidth={3}
                       />
                     </g>
                   ))}
+
+                  {labelRooms &&
+                    parseResult.rooms.map((room) => (
+                      <text
+                        key={room.id}
+                        x={room.cx}
+                        y={room.cy}
+                        textAnchor="middle"
+                        dominantBaseline="central"
+                        fontSize={34}
+                        fontWeight={600}
+                        fill="#0f172a"
+                        stroke="#ffffff"
+                        strokeWidth={4}
+                        paintOrder="stroke"
+                      >
+                        {formatRoomLabelText(room, parseResult.detectedUnit || state.unit)
+                          .split('\n')
+                          .map((line, i) => (
+                            <tspan key={i} x={room.cx} dy={i === 0 ? '-0.4em' : '1.2em'}>
+                              {line}
+                            </tspan>
+                          ))}
+                      </text>
+                    ))}
 
                   {parseResult.windows.map((win) => (
                     <g
@@ -723,9 +764,9 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                     >
                       <rect
                         x={-win.width / 2}
-                        y={-10}
+                        y={-16}
                         width={win.width}
-                        height={20}
+                        height={32}
                         fill="#e0f2fe"
                         stroke="#0284c7"
                         strokeWidth={3}

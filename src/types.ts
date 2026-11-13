@@ -109,6 +109,11 @@ export interface TextBoxItem {
   textAlign: 'left' | 'center' | 'right';
   bold?: boolean;
   italic?: boolean;
+  /**
+   * Set on room labels generated at import. The text is regenerated from these measurements when the plan is
+   * recalibrated or the unit changes, as long as the user hasn't edited it.
+   */
+  room?: { name: string | null; widthCm: number; depthCm: number; areaCm2: number; rectangular: boolean };
 }
 
 export interface BackgroundLayer {
