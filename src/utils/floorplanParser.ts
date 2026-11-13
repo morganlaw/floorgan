@@ -4672,6 +4672,7 @@ export function parseFloorplanRgbaBuffer(
     cmPerPxY,
     origin: { x: ORIGIN_OFFSET_X, y: ORIGIN_OFFSET_Y },
     roomNames: roomCandidates,
+    dimensionLabels: ocrCandidates.filter((c) => c.kind === 'pair'),
     passages,
   });
 
@@ -4984,13 +4985,13 @@ export function createSampleBlueprintBlob(): Promise<Blob> {
   ctx.fillStyle = '#334155';
   ctx.font = 'bold 18px sans-serif';
   ctx.fillText('LIVING ROOM', 175, 410);
-  ctx.fillText('5.2m x 3.4m', 180, 440);
+  ctx.fillText('5.2m x 3.3m', 180, 440);
 
   ctx.fillText('BEDROOM', 530, 185);
   ctx.fillText('3.7m x 6.4m', 525, 215);
 
   ctx.fillText('KITCHEN', 190, 165);
-  ctx.fillText('5.2m x 3.1m', 185, 195);
+  ctx.fillText('5.2m x 3.0m', 185, 195);
 
   return new Promise((resolve, reject) =>
     canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Could not render sample image'))), 'image/png')

@@ -35,6 +35,9 @@ export interface DetectRoomsInput {
   cmPerPxY: number;
   origin: { x: number; y: number };
   roomNames?: RoomNameHint[];
+  /** OCR "W x D" labels (cm, processing px). A label inside a room that roughly matches the measured size
+   * (within 15%) is used as the room's dimensions: the plan's own numbers beat our ±1 px measurement. */
+  dimensionLabels?: { val1Cm: number; val2Cm?: number; cxPx: number; cyPx: number }[];
   /** Doorless openings the parser carved into walls; treated as closed like doors */
   passages?: { x: number; y: number; width: number; rotation: number }[];
   /** Gap size (cm) sealed when finding room cores; rooms narrower than ~2x this are not found */
@@ -251,6 +254,22 @@ export function detectRooms(input: DetectRoomsInput): DetectedRoom[] {
       }
     }
 
+    let finalW = widthCm;
+    let finalD = depthCm;
+    let fromLabel = false;
+    for (const lab of input.dimensionLabels ?? []) {
+      if (!lab.val2Cm) continue;
+      const hx = Math.round(lab.cxPx);
+      const hy = Math.round(lab.cyPx);
+      if (hx < 0 || hy < 0 || hx >= w || hy >= h || label[hy * w + hx] !== id) continue;
+      const errA = Math.max(Math.abs(lab.val1Cm / widthCm - 1), Math.abs(lab.val2Cm / depthCm - 1));
+      const errB = Math.max(Math.abs(lab.val2Cm / widthCm - 1), Math.abs(lab.val1Cm / depthCm - 1));
+      if (Math.min(errA, errB) > 0.15) continue;
+      [finalW, finalD] = errA <= errB ? [lab.val1Cm, lab.val2Cm] : [lab.val2Cm, lab.val1Cm];
+      fromLabel = true;
+      break;
+    }
+
     let name: string | null = null;
     for (const hint of input.roomNames ?? []) {
       const hx = Math.round(hint.cxPx);
@@ -266,10 +285,10 @@ export function detectRooms(input: DetectRoomsInput): DetectedRoom[] {
       name,
       cx: Math.round(origin.x + (ax + 0.5) * cmPerPxX),
       cy: Math.round(origin.y + (ay + 0.5) * cmPerPxY),
-      widthCm: Math.round(widthCm),
-      depthCm: Math.round(depthCm),
-      areaCm2: Math.round(areaCm2),
-      rectangular: fill >= 0.85,
+      widthCm: Math.round(finalW),
+      depthCm: Math.round(finalD),
+      areaCm2: Math.round(fromLabel ? (areaCm2 * finalW * finalD) / (widthCm * depthCm) : areaCm2),
+      rectangular: fromLabel || fill >= 0.85,
       bboxPx: { x0: x0 - r, y0: y0 - r, x1: x1 + 1 + r, y1: y1 + 1 + r },
     });
   });
